@@ -17,6 +17,7 @@ It can display:
 - staged files
 - repository trees
 - search results inside files and filenames
+- last file authors with optional icons
 
 all with a clean tree view.
 
@@ -29,6 +30,8 @@ all with a clean tree view.
 - 🔍 Search inside file contents
 - 📁 Search in file names
 - ✨ Glob pattern support (`*.php`, `*Controller*`)
+- 👤 Last file author display
+- 🎭 Custom author aliases and icons
 - 📦 Commit / range / staged / full repo support
 - 🧠 Git-style CLI
 - ⚡ Single standalone Python script
@@ -75,9 +78,9 @@ git tree
 Example:
 
 ```text
-└── application/
-    ├── M security.yaml
-    └── A auth.php
+└── src/
+    ├── M auth.py
+    └── A permissions.py
 
 2 files changed: 1 added, 1 modified, 0 deleted, 0 renamed
 ```
@@ -95,7 +98,7 @@ git tree HEAD^
 ```
 
 ```bash
-git tree c47e32142
+git tree a1b2c3d4
 ```
 
 ---
@@ -112,6 +115,22 @@ git tree HEAD~3..HEAD
 
 ```bash
 git tree --staged
+```
+
+---
+
+# Full Repository Tree
+
+## Display all tracked files
+
+```bash
+git tree --all
+```
+
+## Restrict to a path
+
+```bash
+git tree --all src/
 ```
 
 ---
@@ -133,7 +152,7 @@ Example:
 
 ---
 
-## Search in the whole repository
+## Search inside all tracked files
 
 ```bash
 git tree -as TODO
@@ -143,20 +162,6 @@ Equivalent:
 
 ```bash
 git tree --all --search TODO
-```
-
----
-
-## Combined short flags
-
-```bash
-git tree -asv TODO
-```
-
-Equivalent:
-
-```bash
-git tree --all --search TODO --verbose
 ```
 
 ---
@@ -174,14 +179,16 @@ git tree -as "*Controller*"
 Example:
 
 ```text
-└── application/
+└── src/
     └── Controller/
         └── ProjectController.php (1 occurrence de *Controller*: 1 nom)
 ```
 
 ---
 
-## Verbose search mode
+# Verbose Search Mode
+
+Display matching lines:
 
 ```bash
 git tree -asv TODO
@@ -197,27 +204,89 @@ Example:
 
 ---
 
-# Full repository tree
+# Last Author
+
+Display the last Git author who modified each file:
 
 ```bash
-git tree --all
-```
-
-```bash
-git tree --all src/
+git tree HEAD -l
 ```
 
 Example:
 
 ```text
-└── application/
-    └── modules/
-        └── ...
+└── M auth.py [🎩 UserA • 2 hours ago]
+```
+
+Works with every mode:
+
+```bash
+git tree -asvl "*.php"
+```
+
+```bash
+git tree HEAD~5..HEAD -l
+```
+
+```bash
+git tree --staged -l
 ```
 
 ---
 
-# Path filtering
+# Author Icons
+
+Optional author aliases and icons can be configured.
+
+Config file:
+
+```text
+~/.config/git-tree/authors.conf
+```
+
+Example:
+
+```ini
+[aliases]
+UserA=user-a
+DEV-12345=user-b
+
+[icons]
+user-a=🎩
+user-b=🦊
+```
+
+Result:
+
+```text
+└── M auth.py [🎩 user-a • 2 hours ago]
+```
+
+If no config exists, `git-tree` simply displays the raw Git author name.
+
+---
+
+# Combined Short Flags
+
+You can combine short flags:
+
+```bash
+git tree -as "*.php"
+git tree -asv TODO
+git tree -asvl "*.png"
+```
+
+Equivalent to:
+
+```bash
+git tree --all --search "*.php"
+git tree --all --search TODO --verbose
+git tree --all --search "*.png" --verbose --last-author
+```
+
+---
+
+# Path Filtering
 
 ```bash
 git tree HEAD src/
@@ -242,6 +311,7 @@ git tree HEAD -- app/components
 | `-a`, `--all` | Show/search all tracked files |
 | `-s`, `--search` | Search string |
 | `-v`, `--verbose` | Show matching lines |
+| `-l`, `--last-author` | Show last file author |
 | `--staged` | Show staged files |
 | `-h`, `--help` | Show help |
 
@@ -291,6 +361,12 @@ git tree -as "*.vue"
 git tree -asv TODO
 ```
 
+## Search with authors
+
+```bash
+git tree -asvl "*.php"
+```
+
 ## Search in a specific path
 
 ```bash
@@ -312,6 +388,7 @@ But none of them provide a visual tree overview of:
 - changed files
 - search results
 - repository structure
+- file ownership
 
 `git-tree` tries to bridge that gap with a lightweight Git-native UX.
 
