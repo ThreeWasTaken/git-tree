@@ -1,10 +1,144 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 
-set -euo pipefail
+import argparse
+import fnmatch
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from typing import Any
 
-usage() {
-  cat <<EOF
-usage:
+
+RESET = "\033[0m"
+BOLD = "\033[1m"
+GREEN = "\033[32m"
+BLUE = "\033[34m"
+RED = "\033[31m"
+MAGENTA = "\033[35m"
+CYAN = "\033[36m"
+YELLOW = "\033[33m"
+
+STATUS_COLOR = {
+    "A": GREEN,
+    "M": BLUE,
+    "D": RED,
+    "R": MAGENTA,
+    "T": RESET,
+}
+
+
+@dataclass
+class FileEntry:
+    status: str
+    path: str
+    old_path: str | None = None
+    search_count: int = 0
+    content_search_count: int = 0
+    filename_search_count: int = 0
+    search_lines: list[tuple[int, str]] = field(default_factory=list)
+
+
+def run_git(args: list[str]) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        return result.stdout
+
+    except subprocess.CalledProcessError as exc:
+        print(exc.stderr.strip(), file=sys.stderr)
+        sys.exit(exc.returncode)
+
+
+def normalize_short_flags(argv: list[str]) -> list[str]:
+    normalized = []
+
+    combined_flags = {
+        "-asv": ["-a", "-v", "-s"],
+        "-avs": ["-a", "-v", "-s"],
+        "-sav": ["-a", "-v", "-s"],
+        "-sva": ["-a", "-v", "-s"],
+        "-vas": ["-a", "-v", "-s"],
+        "-vsa": ["-a", "-v", "-s"],
+        "-as": ["-a", "-s"],
+        "-sa": ["-a", "-s"],
+        "-av": ["-a", "-v"],
+        "-va": ["-a", "-v"],
+    }
+
+    for arg in argv:
+        normalized.extend(combined_flags.get(arg, [arg]))
+
+    return normalized
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="git tree",
+        description="Display Git files as a colored tree.",
+        add_help=False,
+    )
+
+    parser.add_argument(
+        "args",
+        nargs="*",
+        help="commit/range and optional paths",
+    )
+
+    parser.add_argument(
+        "-h",
+        "--help",
+        action="store_true",
+        dest="help",
+    )
+
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="show/search all tracked files",
+    )
+
+    parser.add_argument(
+        "-s",
+        "--search",
+        metavar="STRING",
+        help="search in file contents and names",
+    )
+
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="show matching lines",
+    )
+
+    parser.add_argument(
+        "--staged",
+        action="store_true",
+        help="show staged files",
+    )
+
+    parsed = parser.parse_args(
+        normalize_short_flags(sys.argv[1:])
+    )
+
+    if parsed.help:
+        print_help()
+        sys.exit(0)
+
+    return parsed
+
+
+def print_help() -> None:
+    print(
+        """usage:
   git tree
   git tree HEAD
   git tree HEAD~3..HEAD
@@ -12,10 +146,8 @@ usage:
   git tree --staged
   git tree --all
   git tree -s <string>
-  git tree --search <string>
-  git tree -a -s <string>
   git tree -as <string>
-  git tree --all --search <string>
+  git tree -asv <string>
 
 examples:
   git tree
@@ -29,170 +161,148 @@ examples:
   git tree -s patate
   git tree HEAD -s patate
   git tree -as patate
-  git tree -as "*.pdf"
-  git tree --all --search patate
-EOF
-}
+  git tree -as "*.php"
+  git tree -asv patate
+"""
+    )
 
-if [[ "${1:-}" == "-h" ]]; then
-  usage
-  exit 0
-fi
 
-MODE="commit"
-TARGET="HEAD"
-SEARCH=""
-VERBOSE=0
-ALL=0
-PATHS=()
-ARGS=()
+def split_target_and_paths(
+    raw_args: list[str],
+    staged: bool,
+) -> tuple[str, list[str]]:
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --help)
-      usage
-      exit 0
-      ;;
-    --staged)
-      MODE="staged"
-      shift
-      ;;
-    --all)
-      ALL=1
-      shift
-      ;;
-    -as|-sa)
-      ALL=1
-      if [[ -z "${2:-}" ]]; then
-        echo "git tree: -as requires a search value" >&2
-        exit 1
-      fi
-      SEARCH="$2"
-      shift 2
-      ;;
-    -a)
-      ALL=1
-      shift
-      ;;
-    --search|-s)
-      if [[ -z "${2:-}" ]]; then
-        echo "git tree: --search requires a value" >&2
-        exit 1
-      fi
-      SEARCH="$2"
-      shift 2
-      ;;
-    -v|--verbose)
-      VERBOSE=1
-      shift
-      ;;
-    --)
-      shift
-      while [[ $# -gt 0 ]]; do
-        PATHS+=("$1")
-        shift
-      done
-      ;;
-    *)
-      ARGS+=("$1")
-      shift
-      ;;
-  esac
-done
+    if staged:
+        return "HEAD", raw_args
 
-if [[ "$MODE" != "staged" && ${#ARGS[@]} -gt 0 ]]; then
-  TARGET="${ARGS[0]}"
-  PATHS+=("${ARGS[@]:1}")
-elif [[ "$MODE" == "staged" ]]; then
-  PATHS+=("${ARGS[@]}")
-fi
+    if not raw_args:
+        return "__WORKTREE__", []
 
-TMP=$(mktemp)
-trap 'rm -f "$TMP"' EXIT
+    return raw_args[0], raw_args[1:]
 
-if [[ "$ALL" == "1" ]]; then
-  git ls-files -- "${PATHS[@]}" | awk '{print "T\t" $0}' > "$TMP"
 
-elif [[ "$MODE" == "staged" ]]; then
-  git diff --cached --name-status -- "${PATHS[@]}" > "$TMP"
+def parse_entries(output: str) -> list[FileEntry]:
+    entries: list[FileEntry] = []
 
-else
-  if [[ "$TARGET" == "HEAD" && ${#ARGS[@]} -eq 0 ]]; then
-    git diff --name-status HEAD -- "${PATHS[@]}" > "$TMP"
+    for line in output.splitlines():
+        if not line.strip():
+            continue
 
-  elif [[ "$TARGET" == *".."* ]]; then
-    git diff --name-status "$TARGET" -- "${PATHS[@]}" > "$TMP"
+        cols = line.split("\t")
+        raw_status = cols[0]
 
-  else
-    git diff-tree \
-      --no-commit-id \
-      --name-status \
-      -r "$TARGET" \
-      -- "${PATHS[@]}" \
-      > "$TMP"
-  fi
-fi
+        if raw_status.startswith("R"):
+            entries.append(
+                FileEntry(
+                    status="R",
+                    old_path=cols[1],
+                    path=cols[2],
+                )
+            )
 
-python3 - "$TMP" "$SEARCH" "$VERBOSE" "$ALL" <<'PY'
-import fnmatch
-import os
-import re
-import sys
+        else:
+            entries.append(
+                FileEntry(
+                    status=raw_status[0],
+                    path=cols[1],
+                )
+            )
 
-RESET   = "\033[0m"
-BOLD    = "\033[1m"
-GREEN   = "\033[32m"
-BLUE    = "\033[34m"
-RED     = "\033[31m"
-MAGENTA = "\033[35m"
-CYAN    = "\033[36m"
-YELLOW  = "\033[33m"
+    return entries
 
-STATUS_COLOR = {
-    "A": GREEN,
-    "M": BLUE,
-    "D": RED,
-    "R": MAGENTA,
-    "T": RESET,
-}
 
-SUMMARY = {
-    "A": 0,
-    "M": 0,
-    "D": 0,
-    "R": 0,
-    "T": 0,
-}
+def get_entries(
+    target: str,
+    paths: list[str],
+    staged: bool,
+    all_mode: bool,
+) -> list[FileEntry]:
 
-search = sys.argv[2]
-verbose = sys.argv[3] == "1"
-all_mode = sys.argv[4] == "1"
+    if all_mode:
+        output = run_git([
+            "ls-files",
+            "--",
+            *paths,
+        ])
 
-tree = {}
+        return [
+            FileEntry(status="T", path=line)
+            for line in output.splitlines()
+            if line.strip()
+        ]
 
-def highlight_text(text, needle):
+    if staged:
+        output = run_git([
+            "diff",
+            "--cached",
+            "--name-status",
+            "--",
+            *paths,
+        ])
+
+    elif target == "__WORKTREE__":
+        output = run_git([
+            "diff",
+            "--name-status",
+            "HEAD",
+            "--",
+            *paths,
+        ])
+
+    elif ".." in target:
+        output = run_git([
+            "diff",
+            "--name-status",
+            target,
+            "--",
+            *paths,
+        ])
+
+    else:
+        output = run_git([
+            "diff-tree",
+            "--no-commit-id",
+            "--name-status",
+            "-r",
+            target,
+            "--",
+            *paths,
+        ])
+
+    return parse_entries(output)
+
+
+def highlight_text(
+    text: str,
+    needle: str,
+) -> str:
+
     if not needle:
         return text
 
     if "*" in needle or "?" in needle:
         return text
 
-    pattern = re.compile(re.escape(needle), re.IGNORECASE)
-
-    return pattern.sub(
-        lambda m: f"{YELLOW}{BOLD}{m.group(0)}{RESET}",
-        text
+    pattern = re.compile(
+        re.escape(needle),
+        re.IGNORECASE,
     )
 
-def insert(tree, parts, payload):
-    current = tree
+    return pattern.sub(
+        lambda m: (
+            f"{YELLOW}{BOLD}"
+            f"{m.group(0)}"
+            f"{RESET}"
+        ),
+        text,
+    )
 
-    for p in parts[:-1]:
-        current = current.setdefault(p, {})
 
-    current[parts[-1]] = payload
+def search_file(
+    path: str,
+    needle: str,
+) -> tuple[int, list[tuple[int, str]]]:
 
-def search_file(path, needle):
     if not needle or not os.path.isfile(path):
         return 0, []
 
@@ -200,138 +310,222 @@ def search_file(path, needle):
         return 0, []
 
     count = 0
-    lines = []
 
-    pattern = re.compile(re.escape(needle), re.IGNORECASE)
+    lines: list[tuple[int, str]] = []
+
+    pattern = re.compile(
+        re.escape(needle),
+        re.IGNORECASE,
+    )
 
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            for number, line in enumerate(f, 1):
+        with open(
+            path,
+            "r",
+            encoding="utf-8",
+            errors="replace",
+        ) as file:
+
+            for number, line in enumerate(file, 1):
                 matches = len(pattern.findall(line))
 
-                if matches:
-                    count += matches
+                if not matches:
+                    continue
 
-                    cleaned = line.rstrip("\n")
+                count += matches
 
-                    highlighted = pattern.sub(
-                        lambda m: (
-                            f"{YELLOW}{BOLD}"
-                            f"{m.group(0)}"
-                            f"{RESET}"
-                        ),
-                        cleaned
-                    )
+                cleaned = line.rstrip("\n")
 
-                    lines.append((number, highlighted))
+                highlighted = pattern.sub(
+                    lambda m: (
+                        f"{YELLOW}{BOLD}"
+                        f"{m.group(0)}"
+                        f"{RESET}"
+                    ),
+                    cleaned,
+                )
+
+                lines.append((number, highlighted))
 
     except OSError:
         return 0, []
 
     return count, lines
 
-with open(sys.argv[1]) as f:
-    for line in f:
-        line = line.rstrip()
 
-        if not line:
-            continue
+def filename_match_count(
+    path: str,
+    needle: str,
+) -> int:
 
-        cols = line.split("\t")
-        raw_status = cols[0]
+    if not needle:
+        return 0
 
-        if raw_status.startswith("R"):
-            status = "R"
-            old_path = cols[1]
-            path = cols[2]
+    basename = os.path.basename(path).lower()
+    lowered = needle.lower()
 
-            payload = {
-                "status": status,
-                "old": old_path,
-                "new": path,
-            }
+    if "*" in needle or "?" in needle:
+        return (
+            1
+            if fnmatch.fnmatch(basename, lowered)
+            else 0
+        )
 
-        else:
-            status = raw_status[0]
-            path = cols[1]
+    return len(
+        re.findall(
+            re.escape(needle),
+            path,
+            flags=re.IGNORECASE,
+        )
+    )
 
-            payload = {
-                "status": status,
-                "path": path,
-            }
 
-        if status not in SUMMARY:
-            SUMMARY[status] = 0
+def apply_search(
+    entries: list[FileEntry],
+    needle: str,
+) -> list[FileEntry]:
 
-        SUMMARY[status] += 1
+    if not needle:
+        return entries
 
-        content_count, lines = search_file(path, search)
+    kept: list[FileEntry] = []
 
-        filename_count = 0
+    for entry in entries:
+        content_count, lines = search_file(
+            entry.path,
+            needle,
+        )
 
-        if search:
-            basename = os.path.basename(path).lower()
-            lowered = search.lower()
+        name_count = filename_match_count(
+            entry.path,
+            needle,
+        )
 
-            if "*" in search or "?" in search:
-                if fnmatch.fnmatch(basename, lowered):
-                    filename_count = 1
+        entry.content_search_count = content_count
+        entry.filename_search_count = name_count
+        entry.search_count = content_count + name_count
+        entry.search_lines = lines
 
-            else:
-                filename_count = len(
-                    re.findall(
-                        re.escape(search),
-                        path,
-                        flags=re.IGNORECASE
-                    )
-                )
+        if entry.search_count > 0:
+            kept.append(entry)
 
-        count = content_count + filename_count
+    return kept
 
-        payload["search_count"] = count
-        payload["content_search_count"] = content_count
-        payload["filename_search_count"] = filename_count
-        payload["search_lines"] = lines
 
-        if search and count == 0:
-            continue
+def insert(
+    tree: dict[str, Any],
+    parts: list[str],
+    entry: FileEntry,
+) -> None:
 
-        insert(tree, path.split("/"), payload)
+    current = tree
 
-def pluralize(n, singular, plural):
+    for part in parts[:-1]:
+        current = current.setdefault(part, {})
+
+    current[parts[-1]] = entry
+
+
+def build_tree(
+    entries: list[FileEntry],
+) -> dict[str, Any]:
+
+    tree: dict[str, Any] = {}
+
+    for entry in entries:
+        insert(
+            tree,
+            entry.path.split("/"),
+            entry,
+        )
+
+    return tree
+
+
+def pluralize(
+    n: int,
+    singular: str,
+    plural: str,
+) -> str:
+
     return singular if n == 1 else plural
 
-def print_match_lines(lines, prefix):
+
+def print_match_lines(
+    lines: list[tuple[int, str]],
+    prefix: str,
+) -> None:
+
     for i, (number, content) in enumerate(lines):
         last = i == len(lines) - 1
 
-        connector = "└── " if last else "├── "
+        connector = (
+            "└── "
+            if last
+            else "├── "
+        )
 
         print(
             f"{prefix}{connector}"
-            f"{CYAN}{number}:{RESET} {content}"
+            f"{CYAN}{number}:{RESET} "
+            f"{content}"
         )
 
-def print_tree(node, prefix=""):
+
+def print_tree(
+    node: dict[str, Any],
+    search: str,
+    verbose: bool,
+    all_mode: bool,
+    prefix: str = "",
+) -> None:
+
     items = sorted(node.items())
 
     for i, (name, value) in enumerate(items):
         last = i == len(items) - 1
 
-        connector = "└── " if last else "├── "
-        next_prefix = prefix + ("    " if last else "│   ")
+        connector = (
+            "└── "
+            if last
+            else "├── "
+        )
 
-        if isinstance(value, dict) and "status" not in value:
-            print(f"{prefix}{connector}{BOLD}{name}/{RESET}")
-            print_tree(value, next_prefix)
+        next_prefix = (
+            prefix
+            + (
+                "    "
+                if last
+                else "│   "
+            )
+        )
+
+        if isinstance(value, dict):
+            print(
+                f"{prefix}{connector}"
+                f"{BOLD}{name}/{RESET}"
+            )
+
+            print_tree(
+                value,
+                search,
+                verbose,
+                all_mode,
+                next_prefix,
+            )
+
             continue
 
-        status = value["status"]
-        color = STATUS_COLOR.get(status, RESET)
+        entry: FileEntry = value
 
-        if status == "R":
-            old_name = value["old"].split("/")[-1]
-            new_name = value["new"].split("/")[-1]
+        color = STATUS_COLOR.get(
+            entry.status,
+            RESET,
+        )
+
+        if entry.status == "R" and entry.old_path:
+            old_name = entry.old_path.split("/")[-1]
+            new_name = entry.path.split("/")[-1]
 
             display = (
                 f"{old_name} "
@@ -343,35 +537,41 @@ def print_tree(node, prefix=""):
             display = name
 
         if search:
-            display = highlight_text(display, search)
+            display = highlight_text(
+                display,
+                search,
+            )
 
         suffix = ""
 
         if search:
-            count = value["search_count"]
-            content_count = value["content_search_count"]
-            filename_count = value["filename_search_count"]
-
             details = []
 
-            if content_count:
-                details.append(f"{content_count} contenu")
+            if entry.content_search_count:
+                details.append(
+                    f"{entry.content_search_count} contenu"
+                )
 
-            if filename_count:
-                details.append(f"{filename_count} nom")
+            if entry.filename_search_count:
+                details.append(
+                    f"{entry.filename_search_count} nom"
+                )
 
             details_text = ", ".join(details)
 
             suffix = (
                 f" {CYAN}("
-                f"{count} "
-                f"{pluralize(count, 'occurrence', 'occurrences')} "
+                f"{entry.search_count} "
+                f"{pluralize(entry.search_count, 'occurrence', 'occurrences')} "
                 f"de "
                 f"{YELLOW}{BOLD}{search}{RESET}"
             )
 
             if details_text:
-                suffix += f"{CYAN}: {details_text}"
+                suffix += (
+                    f"{CYAN}: "
+                    f"{details_text}"
+                )
 
             suffix += f"{CYAN}){RESET}"
 
@@ -381,74 +581,134 @@ def print_tree(node, prefix=""):
                 f"{color}{display}{RESET}"
                 f"{suffix}"
             )
+
         else:
             print(
                 f"{prefix}{connector}"
-                f"{color}{status}{RESET} "
+                f"{color}{entry.status}{RESET} "
                 f"{color}{display}{RESET}"
                 f"{suffix}"
             )
 
-        if search and verbose and value["search_lines"]:
+        if (
+            search
+            and verbose
+            and entry.search_lines
+        ):
             print_match_lines(
-                value["search_lines"],
-                next_prefix
+                entry.search_lines,
+                next_prefix,
             )
 
-def sum_search_counts(node):
-    total = 0
 
-    for value in node.values():
-        if isinstance(value, dict) and "status" not in value:
-            total += sum_search_counts(value)
+def print_summary(
+    entries_before_search: list[FileEntry],
+    entries_after_search: list[FileEntry],
+    search: str,
+    all_mode: bool,
+) -> None:
 
-        else:
-            total += value.get("search_count", 0)
+    summary = {
+        "A": 0,
+        "M": 0,
+        "D": 0,
+        "R": 0,
+    }
 
-    return total
+    for entry in entries_before_search:
+        if entry.status in summary:
+            summary[entry.status] += 1
 
-if search and not tree:
-    print(
-        f"{CYAN}No occurrence found for "
-        f"{YELLOW}{BOLD}{search}{RESET}"
-    )
-    sys.exit(0)
+    total = len(entries_before_search)
 
-print_tree(tree)
-
-total = sum(SUMMARY.values())
-search_total = sum_search_counts(tree)
-
-print()
-
-if all_mode:
-    print(f"{BOLD}{total} files scanned{RESET}")
-
-else:
-    print(
-        f"{BOLD}{total} files changed{RESET}: "
-        f"{GREEN}{SUMMARY.get('A', 0)} added{RESET}, "
-        f"{BLUE}{SUMMARY.get('M', 0)} modified{RESET}, "
-        f"{RED}{SUMMARY.get('D', 0)} deleted{RESET}, "
-        f"{MAGENTA}{SUMMARY.get('R', 0)} renamed{RESET}"
+    search_total = sum(
+        entry.search_count
+        for entry in entries_after_search
     )
 
-if search:
-    print(
-        f"{CYAN}{search_total} "
-        f"{pluralize(search_total, 'occurrence', 'occurrences')} "
-        f"de "
-        f"{YELLOW}{BOLD}{search}{RESET}"
-    )
-
-if not all_mode:
     print()
-    print(
-        f"Legend: "
-        f"{GREEN}A added{RESET}  "
-        f"{BLUE}M modified{RESET}  "
-        f"{RED}D deleted{RESET}  "
-        f"{MAGENTA}R renamed{RESET}"
+
+    if all_mode:
+        print(
+            f"{BOLD}{total} files scanned{RESET}"
+        )
+
+    else:
+        print(
+            f"{BOLD}{total} files changed{RESET}: "
+            f"{GREEN}{summary['A']} added{RESET}, "
+            f"{BLUE}{summary['M']} modified{RESET}, "
+            f"{RED}{summary['D']} deleted{RESET}, "
+            f"{MAGENTA}{summary['R']} renamed{RESET}"
+        )
+
+    if search:
+        print(
+            f"{CYAN}{search_total} "
+            f"{pluralize(search_total, 'occurrence', 'occurrences')} "
+            f"de "
+            f"{YELLOW}{BOLD}{search}{RESET}"
+        )
+
+    if not all_mode:
+        print()
+
+        print(
+            f"Legend: "
+            f"{GREEN}A added{RESET}  "
+            f"{BLUE}M modified{RESET}  "
+            f"{RED}D deleted{RESET}  "
+            f"{MAGENTA}R renamed{RESET}"
+        )
+
+
+def main() -> None:
+    options = parse_args()
+
+    target, paths = split_target_and_paths(
+        options.args,
+        options.staged,
     )
 
-PY
+    entries_before_search = get_entries(
+        target=target,
+        paths=paths,
+        staged=options.staged,
+        all_mode=options.all,
+    )
+
+    entries_after_search = apply_search(
+        entries_before_search,
+        options.search or "",
+    )
+
+    if (
+        options.search
+        and not entries_after_search
+    ):
+        print(
+            f"{CYAN}No occurrence found for "
+            f"{YELLOW}{BOLD}{options.search}{RESET}"
+        )
+
+        sys.exit(0)
+
+    tree = build_tree(entries_after_search)
+
+    print_tree(
+        tree,
+        options.search or "",
+        options.verbose,
+        options.all,
+    )
+
+    print_summary(
+        entries_before_search,
+        entries_after_search,
+        options.search or "",
+        options.all,
+    )
+
+
+if __name__ == "__main__":
+    main()
