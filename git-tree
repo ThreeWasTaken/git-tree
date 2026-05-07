@@ -1,0 +1,454 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+  cat <<EOF
+usage:
+  git tree
+  git tree HEAD
+  git tree HEAD~3..HEAD
+  git tree <commit> [path...]
+  git tree --staged
+  git tree --all
+  git tree -s <string>
+  git tree --search <string>
+  git tree -a -s <string>
+  git tree -as <string>
+  git tree --all --search <string>
+
+examples:
+  git tree
+  git tree HEAD^
+  git tree HEAD~5..HEAD
+  git tree --staged
+  git tree HEAD src/
+  git tree HEAD -- app/components
+  git tree --all
+  git tree --all src/
+  git tree -s patate
+  git tree HEAD -s patate
+  git tree -as patate
+  git tree -as "*.pdf"
+  git tree --all --search patate
+EOF
+}
+
+if [[ "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+MODE="commit"
+TARGET="HEAD"
+SEARCH=""
+VERBOSE=0
+ALL=0
+PATHS=()
+ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help)
+      usage
+      exit 0
+      ;;
+    --staged)
+      MODE="staged"
+      shift
+      ;;
+    --all)
+      ALL=1
+      shift
+      ;;
+    -as|-sa)
+      ALL=1
+      if [[ -z "${2:-}" ]]; then
+        echo "git tree: -as requires a search value" >&2
+        exit 1
+      fi
+      SEARCH="$2"
+      shift 2
+      ;;
+    -a)
+      ALL=1
+      shift
+      ;;
+    --search|-s)
+      if [[ -z "${2:-}" ]]; then
+        echo "git tree: --search requires a value" >&2
+        exit 1
+      fi
+      SEARCH="$2"
+      shift 2
+      ;;
+    -v|--verbose)
+      VERBOSE=1
+      shift
+      ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        PATHS+=("$1")
+        shift
+      done
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ "$MODE" != "staged" && ${#ARGS[@]} -gt 0 ]]; then
+  TARGET="${ARGS[0]}"
+  PATHS+=("${ARGS[@]:1}")
+elif [[ "$MODE" == "staged" ]]; then
+  PATHS+=("${ARGS[@]}")
+fi
+
+TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
+
+if [[ "$ALL" == "1" ]]; then
+  git ls-files -- "${PATHS[@]}" | awk '{print "T\t" $0}' > "$TMP"
+
+elif [[ "$MODE" == "staged" ]]; then
+  git diff --cached --name-status -- "${PATHS[@]}" > "$TMP"
+
+else
+  if [[ "$TARGET" == "HEAD" && ${#ARGS[@]} -eq 0 ]]; then
+    git diff --name-status HEAD -- "${PATHS[@]}" > "$TMP"
+
+  elif [[ "$TARGET" == *".."* ]]; then
+    git diff --name-status "$TARGET" -- "${PATHS[@]}" > "$TMP"
+
+  else
+    git diff-tree \
+      --no-commit-id \
+      --name-status \
+      -r "$TARGET" \
+      -- "${PATHS[@]}" \
+      > "$TMP"
+  fi
+fi
+
+python3 - "$TMP" "$SEARCH" "$VERBOSE" "$ALL" <<'PY'
+import fnmatch
+import os
+import re
+import sys
+
+RESET   = "\033[0m"
+BOLD    = "\033[1m"
+GREEN   = "\033[32m"
+BLUE    = "\033[34m"
+RED     = "\033[31m"
+MAGENTA = "\033[35m"
+CYAN    = "\033[36m"
+YELLOW  = "\033[33m"
+
+STATUS_COLOR = {
+    "A": GREEN,
+    "M": BLUE,
+    "D": RED,
+    "R": MAGENTA,
+    "T": RESET,
+}
+
+SUMMARY = {
+    "A": 0,
+    "M": 0,
+    "D": 0,
+    "R": 0,
+    "T": 0,
+}
+
+search = sys.argv[2]
+verbose = sys.argv[3] == "1"
+all_mode = sys.argv[4] == "1"
+
+tree = {}
+
+def highlight_text(text, needle):
+    if not needle:
+        return text
+
+    if "*" in needle or "?" in needle:
+        return text
+
+    pattern = re.compile(re.escape(needle), re.IGNORECASE)
+
+    return pattern.sub(
+        lambda m: f"{YELLOW}{BOLD}{m.group(0)}{RESET}",
+        text
+    )
+
+def insert(tree, parts, payload):
+    current = tree
+
+    for p in parts[:-1]:
+        current = current.setdefault(p, {})
+
+    current[parts[-1]] = payload
+
+def search_file(path, needle):
+    if not needle or not os.path.isfile(path):
+        return 0, []
+
+    if "*" in needle or "?" in needle:
+        return 0, []
+
+    count = 0
+    lines = []
+
+    pattern = re.compile(re.escape(needle), re.IGNORECASE)
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for number, line in enumerate(f, 1):
+                matches = len(pattern.findall(line))
+
+                if matches:
+                    count += matches
+
+                    cleaned = line.rstrip("\n")
+
+                    highlighted = pattern.sub(
+                        lambda m: (
+                            f"{YELLOW}{BOLD}"
+                            f"{m.group(0)}"
+                            f"{RESET}"
+                        ),
+                        cleaned
+                    )
+
+                    lines.append((number, highlighted))
+
+    except OSError:
+        return 0, []
+
+    return count, lines
+
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.rstrip()
+
+        if not line:
+            continue
+
+        cols = line.split("\t")
+        raw_status = cols[0]
+
+        if raw_status.startswith("R"):
+            status = "R"
+            old_path = cols[1]
+            path = cols[2]
+
+            payload = {
+                "status": status,
+                "old": old_path,
+                "new": path,
+            }
+
+        else:
+            status = raw_status[0]
+            path = cols[1]
+
+            payload = {
+                "status": status,
+                "path": path,
+            }
+
+        if status not in SUMMARY:
+            SUMMARY[status] = 0
+
+        SUMMARY[status] += 1
+
+        content_count, lines = search_file(path, search)
+
+        filename_count = 0
+
+        if search:
+            basename = os.path.basename(path).lower()
+            lowered = search.lower()
+
+            if "*" in search or "?" in search:
+                if fnmatch.fnmatch(basename, lowered):
+                    filename_count = 1
+
+            else:
+                filename_count = len(
+                    re.findall(
+                        re.escape(search),
+                        path,
+                        flags=re.IGNORECASE
+                    )
+                )
+
+        count = content_count + filename_count
+
+        payload["search_count"] = count
+        payload["content_search_count"] = content_count
+        payload["filename_search_count"] = filename_count
+        payload["search_lines"] = lines
+
+        if search and count == 0:
+            continue
+
+        insert(tree, path.split("/"), payload)
+
+def pluralize(n, singular, plural):
+    return singular if n == 1 else plural
+
+def print_match_lines(lines, prefix):
+    for i, (number, content) in enumerate(lines):
+        last = i == len(lines) - 1
+
+        connector = "└── " if last else "├── "
+
+        print(
+            f"{prefix}{connector}"
+            f"{CYAN}{number}:{RESET} {content}"
+        )
+
+def print_tree(node, prefix=""):
+    items = sorted(node.items())
+
+    for i, (name, value) in enumerate(items):
+        last = i == len(items) - 1
+
+        connector = "└── " if last else "├── "
+        next_prefix = prefix + ("    " if last else "│   ")
+
+        if isinstance(value, dict) and "status" not in value:
+            print(f"{prefix}{connector}{BOLD}{name}/{RESET}")
+            print_tree(value, next_prefix)
+            continue
+
+        status = value["status"]
+        color = STATUS_COLOR.get(status, RESET)
+
+        if status == "R":
+            old_name = value["old"].split("/")[-1]
+            new_name = value["new"].split("/")[-1]
+
+            display = (
+                f"{old_name} "
+                f"{CYAN}→{RESET} "
+                f"{new_name}"
+            )
+
+        else:
+            display = name
+
+        if search:
+            display = highlight_text(display, search)
+
+        suffix = ""
+
+        if search:
+            count = value["search_count"]
+            content_count = value["content_search_count"]
+            filename_count = value["filename_search_count"]
+
+            details = []
+
+            if content_count:
+                details.append(f"{content_count} contenu")
+
+            if filename_count:
+                details.append(f"{filename_count} nom")
+
+            details_text = ", ".join(details)
+
+            suffix = (
+                f" {CYAN}("
+                f"{count} "
+                f"{pluralize(count, 'occurrence', 'occurrences')} "
+                f"de "
+                f"{YELLOW}{BOLD}{search}{RESET}"
+            )
+
+            if details_text:
+                suffix += f"{CYAN}: {details_text}"
+
+            suffix += f"{CYAN}){RESET}"
+
+        if all_mode:
+            print(
+                f"{prefix}{connector}"
+                f"{color}{display}{RESET}"
+                f"{suffix}"
+            )
+        else:
+            print(
+                f"{prefix}{connector}"
+                f"{color}{status}{RESET} "
+                f"{color}{display}{RESET}"
+                f"{suffix}"
+            )
+
+        if search and verbose and value["search_lines"]:
+            print_match_lines(
+                value["search_lines"],
+                next_prefix
+            )
+
+def sum_search_counts(node):
+    total = 0
+
+    for value in node.values():
+        if isinstance(value, dict) and "status" not in value:
+            total += sum_search_counts(value)
+
+        else:
+            total += value.get("search_count", 0)
+
+    return total
+
+if search and not tree:
+    print(
+        f"{CYAN}No occurrence found for "
+        f"{YELLOW}{BOLD}{search}{RESET}"
+    )
+    sys.exit(0)
+
+print_tree(tree)
+
+total = sum(SUMMARY.values())
+search_total = sum_search_counts(tree)
+
+print()
+
+if all_mode:
+    print(f"{BOLD}{total} files scanned{RESET}")
+
+else:
+    print(
+        f"{BOLD}{total} files changed{RESET}: "
+        f"{GREEN}{SUMMARY.get('A', 0)} added{RESET}, "
+        f"{BLUE}{SUMMARY.get('M', 0)} modified{RESET}, "
+        f"{RED}{SUMMARY.get('D', 0)} deleted{RESET}, "
+        f"{MAGENTA}{SUMMARY.get('R', 0)} renamed{RESET}"
+    )
+
+if search:
+    print(
+        f"{CYAN}{search_total} "
+        f"{pluralize(search_total, 'occurrence', 'occurrences')} "
+        f"de "
+        f"{YELLOW}{BOLD}{search}{RESET}"
+    )
+
+if not all_mode:
+    print()
+    print(
+        f"Legend: "
+        f"{GREEN}A added{RESET}  "
+        f"{BLUE}M modified{RESET}  "
+        f"{RED}D deleted{RESET}  "
+        f"{MAGENTA}R renamed{RESET}"
+    )
+
+PY
