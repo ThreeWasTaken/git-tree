@@ -1,31 +1,44 @@
 # git-tree
 
-A small Git CLI extension to visualize changed files as a colored tree.
+A Git CLI extension to visualize files as a colored tree.
 
-`git-tree` combines:
+`git-tree` combines ideas from:
+
 - `git diff`
 - `tree`
-- `grep`
+- `git grep`
 
 into a single command-line tool.
 
+It can display:
+
+- changed files
+- commit contents
+- staged files
+- repository trees
+- search results inside files and filenames
+
+all with a clean tree view.
+
 ---
 
-## Features
+# Features
 
-- 🌳 Tree view of changed files
-- 🎨 Colored statuses (`A`, `M`, `D`, `R`)
+- 🌳 Tree view output
+- 🎨 Colored Git statuses (`A`, `M`, `D`, `R`)
 - 🔍 Search inside file contents
 - 📁 Search in file names
-- ✨ Glob support (`*.php`, `*Controller*`, etc.)
-- 📦 Works with commits, ranges, staged files, or the whole repo
-- 🧠 Git-style CLI (`git tree ...`)
+- ✨ Glob pattern support (`*.php`, `*Controller*`)
+- 📦 Commit / range / staged / full repo support
+- 🧠 Git-style CLI
+- ⚡ Single standalone Python script
+- 📝 Verbose mode with matching lines
 
 ---
 
 # Installation
 
-## Linux / WSL2 / macOS
+## Linux / macOS / WSL2
 
 Copy the script:
 
@@ -42,9 +55,18 @@ git tree -h
 
 ---
 
+# Requirements
+
+- Python 3.10+
+- Git
+
+No external dependencies.
+
+---
+
 # Usage
 
-## Show current worktree changes
+## Current worktree changes
 
 ```bash
 git tree
@@ -62,7 +84,7 @@ Example:
 
 ---
 
-## Show files modified by a commit
+## Show files from a commit
 
 ```bash
 git tree HEAD
@@ -99,14 +121,14 @@ git tree --staged
 ## Search inside modified files
 
 ```bash
-git tree -s patate
+git tree -s TODO
 ```
 
 Example:
 
 ```text
-└── application/
-    └── RoleEnum.php (6 occurrences de patate)
+└── src/
+    └── M auth.py (2 occurrences de TODO)
 ```
 
 ---
@@ -114,18 +136,32 @@ Example:
 ## Search in the whole repository
 
 ```bash
-git tree -as patate
+git tree -as TODO
 ```
 
 Equivalent:
 
 ```bash
-git tree --all --search patate
+git tree --all --search TODO
 ```
 
 ---
 
-## Search file names with glob patterns
+## Combined short flags
+
+```bash
+git tree -asv TODO
+```
+
+Equivalent:
+
+```bash
+git tree --all --search TODO --verbose
+```
+
+---
+
+## Search using glob patterns
 
 ```bash
 git tree -as "*.php"
@@ -148,15 +184,35 @@ Example:
 ## Verbose search mode
 
 ```bash
-git tree -as patate -v
+git tree -asv TODO
 ```
 
 Example:
 
 ```text
-└── RoleEnum.php (2 occurrences de patate)
-    ├── 12: PATATE_ADMIN
-    └── 42: // patate legacy
+└── auth.py (2 occurrences de TODO)
+    ├── 12: # TODO remove legacy auth
+    └── 42: # TODO simplify permissions
+```
+
+---
+
+# Full repository tree
+
+```bash
+git tree --all
+```
+
+```bash
+git tree --all src/
+```
+
+Example:
+
+```text
+└── application/
+    └── modules/
+        └── ...
 ```
 
 ---
@@ -183,38 +239,62 @@ git tree HEAD -- app/components
 
 | Option | Description |
 |---|---|
-| `--all`, `-a` | Search / display the whole repository |
-| `--search`, `-s` | Search string |
-| `--verbose`, `-v` | Display matching lines |
+| `-a`, `--all` | Show/search all tracked files |
+| `-s`, `--search` | Search string |
+| `-v`, `--verbose` | Show matching lines |
 | `--staged` | Show staged files |
-| `-h` | Help |
+| `-h`, `--help` | Show help |
 
 ---
 
 # Examples
 
+## Current worktree
+
 ```bash
 git tree
 ```
+
+## Last commit
+
+```bash
+git tree HEAD
+```
+
+## Previous commit
+
+```bash
+git tree HEAD^
+```
+
+## Commit range
 
 ```bash
 git tree HEAD~5..HEAD
 ```
 
+## Search in changed files
+
 ```bash
-git tree -s TODO
+git tree -s security
 ```
+
+## Search in all files
 
 ```bash
 git tree -as "*.vue"
 ```
 
-```bash
-git tree -as "Atom*.php"
-```
+## Search with verbose output
 
 ```bash
-git tree HEAD --search security
+git tree -asv TODO
+```
+
+## Search in a specific path
+
+```bash
+git tree -as "*.php" src/
 ```
 
 ---
@@ -222,24 +302,18 @@ git tree HEAD --search security
 # Why?
 
 Git already provides:
+
 - `git diff`
 - `git grep`
 - `git ls-tree`
 
-But none of them provide a structured visual overview of:
+But none of them provide a visual tree overview of:
+
 - changed files
 - search results
 - repository structure
 
 `git-tree` tries to bridge that gap with a lightweight Git-native UX.
-
----
-
-# Requirements
-
-- Bash
-- Python 3
-- Git
 
 ---
 
