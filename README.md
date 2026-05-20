@@ -515,3 +515,6 @@ But none of them provide a visual tree overview of:
 # License
 
 MIT
+
+<img width="606" height="310" alt="image" src="https://github.com/user-attachments/assets/6afb5fd8-12f2-46c2-81a8-390058a10878" />
+
