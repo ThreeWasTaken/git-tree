@@ -7,6 +7,7 @@ from src.context import (
     get_rebase_context,
     get_viewing_context,
 )
+from src.fuzzy import open_with_fzf
 from src.git_utils import get_entries
 from src.render import print_context, print_summary, print_tree
 from src.search import apply_search
@@ -116,6 +117,12 @@ def parse_args() -> argparse.Namespace:
         help="show staged files",
     )
 
+    parser.add_argument(
+        "--fzf",
+        action="store_true",
+        help="select a file with fzf and open it in $VISUAL/$EDITOR",
+    )
+
     parsed = parser.parse_args(
         normalize_short_flags(sys.argv[1:])
     )
@@ -140,6 +147,7 @@ def print_help() -> None:
   git tree -as <string>
   git tree -asv <string>
   git tree -asvl <string>
+  git tree --fzf
 
 examples:
   git tree
@@ -155,6 +163,8 @@ examples:
   git tree -as "*.php"
   git tree -asv TODO
   git tree -asvl "*.png"
+  git tree HEAD --fzf
+  git tree -as "*.php" --fzf
   git tree --legend
 """
     )
@@ -205,17 +215,17 @@ def main() -> None:
         options.search or "",
     )
 
-    print_context(
-        viewing_context=viewing_context,
-        rebase_context=rebase_context,
-        conflict_files=conflict_files,
-    )
-
     if (
         options.search
         and not entries_after_search
     ):
         from src.styles import BOLD, CYAN, RESET, YELLOW
+
+        print_context(
+            viewing_context=viewing_context,
+            rebase_context=rebase_context,
+            conflict_files=conflict_files,
+        )
 
         print(
             f"{CYAN}No occurrence found for "
@@ -233,8 +243,24 @@ def main() -> None:
                 author_config,
             )
 
+    if options.fzf:
+        open_with_fzf(
+            entries_after_search,
+            options.search or "",
+            options.all,
+            target,
+            options.staged,
+        )
+        return
+
     tree = build_tree(
         entries_after_search
+    )
+
+    print_context(
+        viewing_context=viewing_context,
+        rebase_context=rebase_context,
+        conflict_files=conflict_files,
     )
 
     print_tree(

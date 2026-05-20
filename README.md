@@ -7,17 +7,20 @@ A Git CLI extension to visualize files as a colored tree.
 - `git diff`
 - `tree`
 - `git grep`
+- `fzf`
 
-into a single command-line tool.
+into a single Git-native developer tool.
 
 It can display:
 
 - changed files
 - commit contents
+- commit ranges
 - staged files
 - repository trees
 - search results inside files and filenames
 - last file authors with optional icons
+- interactive fuzzy navigation with live previews
 
 all with a clean tree view.
 
@@ -26,7 +29,7 @@ all with a clean tree view.
 # Features
 
 - 🌳 Tree view output
-- 🎨 Colored Git statuses (`A`, `M`, `D`, `R`)
+- 🎨 Colored Git statuses (`A`, `M`, `D`, `R`, `C`)
 - 🔍 Search inside file contents
 - 📁 Search in file names
 - ✨ Glob pattern support (`*.php`, `*Controller*`)
@@ -34,27 +37,11 @@ all with a clean tree view.
 - 🎭 Custom author aliases and icons
 - 📦 Commit / range / staged / full repo support
 - 🧠 Git-style CLI
-- ⚡ Single standalone Python script
 - 📝 Verbose mode with matching lines
-
----
-
-# Installation
-
-## Linux / macOS / WSL2
-
-Copy the script:
-
-```bash
-sudo cp git-tree /usr/local/bin/git-tree
-sudo chmod +x /usr/local/bin/git-tree
-```
-
-Verify installation:
-
-```bash
-git tree -h
-```
+- ⚡ Interactive fuzzy navigation with `fzf`
+- 👀 Live diff/content preview
+- 🧱 Modular Python architecture
+- 🚫 No external Python dependencies
 
 ---
 
@@ -63,7 +50,43 @@ git tree -h
 - Python 3.10+
 - Git
 
-No external dependencies.
+Optional:
+
+- `fzf` for interactive navigation
+
+Install on Ubuntu / Debian / WSL:
+
+```bash
+sudo apt install fzf
+```
+
+---
+
+# Installation
+
+## Clone the repository
+
+```bash
+git clone https://github.com/ThreeWasTaken/git-tree.git
+cd git-tree
+```
+
+---
+
+## Create a symlink
+
+Recommended installation:
+
+```bash
+sudo ln -s "$(pwd)/git-tree" /usr/local/bin/git-tree
+sudo chmod +x git-tree
+```
+
+Verify installation:
+
+```bash
+git tree -h
+```
 
 ---
 
@@ -82,7 +105,7 @@ Example:
     ├── M auth.py
     └── A permissions.py
 
-2 files changed: 1 added, 1 modified, 0 deleted, 0 renamed
+2 files changed: 1 added, 1 modified, 0 deleted, 0 renamed, 0 conflicts
 ```
 
 ---
@@ -107,6 +130,12 @@ git tree a1b2c3d4
 
 ```bash
 git tree HEAD~3..HEAD
+```
+
+Example:
+
+```text
+Viewing: abc123 old commit .. def456 new commit
 ```
 
 ---
@@ -215,7 +244,7 @@ git tree HEAD -l
 Example:
 
 ```text
-└── M auth.py [🎩 UserA • 2 hours ago]
+└── M auth.py [🎩 user-a • 2 hours ago]
 ```
 
 Works with every mode:
@@ -231,6 +260,34 @@ git tree HEAD~5..HEAD -l
 ```bash
 git tree --staged -l
 ```
+
+---
+
+# Interactive Navigation (fzf)
+
+Launch interactive fuzzy navigation:
+
+```bash
+git tree HEAD --fzf
+```
+
+```bash
+git tree -as "*.php" --fzf
+```
+
+Features:
+
+- fuzzy filtering
+- live diff preview
+- live file preview
+- editor integration
+- tree-aware display
+
+Selected files open automatically in:
+
+1. `$VISUAL`
+2. `$EDITOR`
+3. `nano` fallback
 
 ---
 
@@ -304,6 +361,52 @@ git tree HEAD -- app/components
 
 ---
 
+# Rebase & Conflict Awareness
+
+When a rebase is in progress, `git-tree` can display:
+
+- the currently replayed commit
+- conflicted files
+
+Example:
+
+```text
+Rebase: applying abc123 fix auth permissions
+2 conflicts
+```
+
+Conflicted files appear with status:
+
+```text
+C
+```
+
+---
+
+# Project Structure
+
+Internal architecture is documented in:
+
+```text
+STRUCTURE.md
+```
+
+The project is split into small focused modules:
+
+```text
+src/
+├── cli.py
+├── git_utils.py
+├── render.py
+├── search.py
+├── fuzzy.py
+├── authors.py
+├── context.py
+└── ...
+```
+
+---
+
 # Options
 
 | Option | Description |
@@ -313,6 +416,8 @@ git tree HEAD -- app/components
 | `-v`, `--verbose` | Show matching lines |
 | `-l`, `--last-author` | Show last file author |
 | `--staged` | Show staged files |
+| `--fzf` | Interactive fuzzy navigation |
+| `--legend` | Show status legend |
 | `-h`, `--help` | Show help |
 
 ---
@@ -367,6 +472,18 @@ git tree -asv TODO
 git tree -asvl "*.php"
 ```
 
+## Interactive fuzzy navigation
+
+```bash
+git tree HEAD --fzf
+```
+
+## Search + fuzzy navigation
+
+```bash
+git tree -as "*.php" --fzf
+```
+
 ## Search in a specific path
 
 ```bash
@@ -389,6 +506,7 @@ But none of them provide a visual tree overview of:
 - search results
 - repository structure
 - file ownership
+- interactive navigation
 
 `git-tree` tries to bridge that gap with a lightweight Git-native UX.
 
