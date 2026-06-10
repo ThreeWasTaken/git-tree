@@ -1,3 +1,4 @@
+import subprocess
 from dataclasses import dataclass
 
 
@@ -17,6 +18,17 @@ def offset_to_ref(offset: int) -> str:
         return "HEAD^"
 
     return f"HEAD~{offset}"
+
+
+def ref_exists(ref: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+
+    return result.returncode == 0
 
 
 def ref_to_offset(ref: str) -> int | None:
@@ -43,14 +55,9 @@ def ref_to_offset(ref: str) -> int | None:
     return None
 
 
-def parse_history_position(
-    target: str,
-) -> HistoryPosition | None:
-
+def parse_history_position(target: str) -> HistoryPosition | None:
     if target == "__WORKTREE__":
-        return HistoryPosition(
-            mode="worktree",
-        )
+        return HistoryPosition(mode="worktree")
 
     if ".." in target:
         left, right = target.split("..", 1)
@@ -64,10 +71,7 @@ def parse_history_position(
         start_offset = ref_to_offset(left)
         end_offset = ref_to_offset(right)
 
-        if (
-            start_offset is None
-            or end_offset is None
-        ):
+        if start_offset is None or end_offset is None:
             return None
 
         return HistoryPosition(
@@ -87,75 +91,68 @@ def parse_history_position(
     )
 
 
-def format_history_position(
-    position: HistoryPosition,
-) -> str:
-
+def format_history_position(position: HistoryPosition) -> str:
     if position.mode == "worktree":
         return "__WORKTREE__"
 
     if position.mode == "commit":
-        if position.offset is None:
-            return "HEAD"
-
-        return offset_to_ref(position.offset)
+        return offset_to_ref(position.offset or 0)
 
     if position.mode == "range":
-        if (
-            position.start_offset is None
-            or position.end_offset is None
-        ):
-            return "HEAD"
-
         return (
-            f"{offset_to_ref(position.start_offset)}"
+            f"{offset_to_ref(position.start_offset or 0)}"
             f".."
-            f"{offset_to_ref(position.end_offset)}"
+            f"{offset_to_ref(position.end_offset or 0)}"
         )
 
     return "HEAD"
 
 
-def move_left(
-    position: HistoryPosition,
-) -> HistoryPosition:
-
+def move_left(position: HistoryPosition) -> HistoryPosition | None:
     if position.mode == "worktree":
-        return HistoryPosition(
-            mode="commit",
-            offset=0,
-        )
+        candidate = HistoryPosition(mode="commit", offset=0)
+        return candidate if ref_exists("HEAD") else None
 
     if position.mode == "commit":
+        next_offset = (position.offset or 0) + 1
+        next_ref = offset_to_ref(next_offset)
+
+        if not ref_exists(next_ref):
+            return None
+
         return HistoryPosition(
             mode="commit",
-            offset=(position.offset or 0) + 1,
+            offset=next_offset,
         )
 
     if position.mode == "range":
+        next_start = (position.start_offset or 0) + 1
+        next_end = (position.end_offset or 0) + 1
+
+        if not ref_exists(offset_to_ref(next_start)):
+            return None
+
+        if not ref_exists(offset_to_ref(next_end)):
+            return None
+
         return HistoryPosition(
             mode="range",
-            start_offset=(position.start_offset or 0) + 1,
-            end_offset=(position.end_offset or 0) + 1,
+            start_offset=next_start,
+            end_offset=next_end,
         )
 
-    return position
+    return None
 
 
-def move_right(
-    position: HistoryPosition,
-) -> HistoryPosition:
-
+def move_right(position: HistoryPosition) -> HistoryPosition | None:
     if position.mode == "worktree":
-        return position
+        return None
 
     if position.mode == "commit":
         offset = position.offset or 0
 
         if offset == 0:
-            return HistoryPosition(
-                mode="worktree",
-            )
+            return HistoryPosition(mode="worktree")
 
         return HistoryPosition(
             mode="commit",
@@ -167,7 +164,7 @@ def move_right(
         end_offset = position.end_offset or 0
 
         if end_offset == 0:
-            return position
+            return None
 
         return HistoryPosition(
             mode="range",
@@ -175,27 +172,24 @@ def move_right(
             end_offset=end_offset - 1,
         )
 
-    return position
+    return None
 
 
-def previous_target(
-    target: str,
-) -> str | None:
-
+def previous_target(target: str) -> str | None:
     position = parse_history_position(target)
 
     if position is None:
         return None
 
-    return format_history_position(
-        move_left(position)
-    )
+    moved = move_left(position)
+
+    if moved is None:
+        return None
+
+    return format_history_position(moved)
 
 
-def next_target(
-    target: str,
-) -> str | None:
-
+def next_target(target: str) -> str | None:
     position = parse_history_position(target)
 
     if position is None:
@@ -203,7 +197,7 @@ def next_target(
 
     moved = move_right(position)
 
-    if moved == position:
+    if moved is None:
         return None
 
     return format_history_position(moved)
