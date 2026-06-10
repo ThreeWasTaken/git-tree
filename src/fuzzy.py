@@ -2,8 +2,12 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
 from typing import Any
 
+from src.context import get_viewing_context
+from src.history_nav import next_target, previous_target
 from src.models import FileEntry
 from src.search import highlight_text
 from src.styles import BOLD, CYAN, RESET, STATUS_COLOR, YELLOW
@@ -143,6 +147,49 @@ def build_fzf_lines(
     return lines
 
 
+def build_fzf_header(
+    viewing_context: str,
+    file_count: int,
+) -> list[str]:
+    lines = viewing_context.splitlines()
+    lines.append(f"{file_count} files")
+    lines.append("← older    → newer    Enter open    Esc quit")
+    return lines
+
+
+def build_fzf_source_output(
+    entries: list[FileEntry],
+    search: str,
+    all_mode: bool,
+    viewing_context: str,
+) -> str:
+    tree = build_tree(entries)
+
+    header_lines = build_fzf_header(
+        viewing_context,
+        len(entries),
+    )
+
+    tree_lines = build_fzf_lines(
+        tree,
+        search,
+        all_mode,
+    )
+
+    return "\n".join(
+        [
+            *header_lines,
+            *tree_lines,
+        ]
+    )
+
+
+def get_fzf_header_line_count(
+    viewing_context: str,
+) -> int:
+    return len(viewing_context.splitlines()) + 2
+
+
 def build_preview_command() -> str:
     return r'''
 line="$1"
@@ -152,7 +199,21 @@ if [ -z "$path" ]; then
   exit 0
 fi
 
-case "$GIT_TREE_PREVIEW_MODE" in
+target="$(cat "$GIT_TREE_FZF_TARGET_FILE" 2>/dev/null)"
+
+if [ "$GIT_TREE_PREVIEW_ALL" = "1" ]; then
+  mode="all"
+elif [ "$GIT_TREE_PREVIEW_STAGED" = "1" ]; then
+  mode="staged"
+elif [ "$target" = "__WORKTREE__" ]; then
+  mode="worktree"
+elif printf "%s" "$target" | grep -q "\.\."; then
+  mode="range"
+else
+  mode="commit"
+fi
+
+case "$mode" in
   all)
     sed -n '1,200p' "$path" 2>/dev/null
     ;;
@@ -166,11 +227,11 @@ case "$GIT_TREE_PREVIEW_MODE" in
     ;;
 
   range)
-    git diff --color=always "$GIT_TREE_PREVIEW_TARGET" -- "$path" 2>/dev/null
+    git diff --color=always "$target" -- "$path" 2>/dev/null
     ;;
 
   commit)
-    git show --color=always --format= "$GIT_TREE_PREVIEW_TARGET" -- "$path" 2>/dev/null
+    git show --color=always --format= "$target" -- "$path" 2>/dev/null
     ;;
 
   *)
@@ -180,24 +241,66 @@ esac
 '''
 
 
-def get_preview_mode(
-    target: str,
-    staged: bool,
+def quote_args(args: list[str]) -> str:
+    return " ".join(
+        shlex.quote(arg)
+        for arg in args
+    )
+
+
+def build_fzf_source_command(
+    executable: str,
+    target_file: str,
+    search: str,
     all_mode: bool,
+    staged: bool,
+    last_author: bool,
+    paths: list[str],
 ) -> str:
+    args = [
+        executable,
+        "--fzf-source",
+        f'"$(cat {shlex.quote(target_file)})"',
+    ]
+
     if all_mode:
-        return "all"
+        args.append("--all")
 
     if staged:
-        return "staged"
+        args.append("--staged")
 
-    if target == "__WORKTREE__":
-        return "worktree"
+    if last_author:
+        args.append("--last-author")
 
-    if ".." in target:
-        return "range"
+    if search:
+        args.extend(
+            [
+                "--search",
+                search,
+            ]
+        )
 
-    return "commit"
+    args.extend(paths)
+
+    return quote_args(args).replace(
+        shlex.quote(f'"$(cat {target_file})"'),
+        f'"$(cat {shlex.quote(target_file)})"',
+    )
+
+
+def build_move_command(
+    executable: str,
+    direction: str,
+    target_file: str,
+) -> str:
+    helper = "--history-prev" if direction == "left" else "--history-next"
+
+    return (
+        f'next="$({shlex.quote(executable)} {helper} "$(cat {shlex.quote(target_file)})")"; '
+        f'if [ -n "$next" ]; then '
+        f'printf "%s" "$next" > {shlex.quote(target_file)}; '
+        f'fi'
+    )
 
 
 def open_with_fzf(
@@ -207,6 +310,8 @@ def open_with_fzf(
     target: str,
     staged: bool,
     viewing_context: str,
+    last_author: bool,
+    paths: list[str],
 ) -> None:
     if not shutil.which("fzf"):
         print("git tree: fzf is not installed")
@@ -217,76 +322,112 @@ def open_with_fzf(
         print("git tree: no file to select")
         return
 
-    tree = build_tree(entries)
+    executable = sys.argv[0]
 
-    lines = build_fzf_lines(
-        tree,
+    source_output = build_fzf_source_output(
+        entries,
         search,
         all_mode,
+        viewing_context,
     )
 
-    preview_mode = get_preview_mode(
-        target,
-        staged,
-        all_mode,
+    header_line_count = get_fzf_header_line_count(
+        viewing_context,
     )
-
-    env = {
-        **os.environ,
-        "GIT_TREE_PREVIEW_MODE": preview_mode,
-        "GIT_TREE_PREVIEW_TARGET": target,
-    }
 
     preview_command = build_preview_command()
 
-    header = (
-        f"{viewing_context}\n"
-        f"{len(entries)} files"
-    )
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        delete=False,
+    ) as target_file:
+        target_file.write(target)
+        target_file_path = target_file.name
 
-    fzf_command = [
-        "fzf",
-        "--ansi",
-        "--prompt",
-        "git-tree> ",
-        "--height",
-        "90%",
-        "--border",
-        "--layout",
-        "reverse",
-        "--header",
-        header,
-        "--delimiter",
-        HIDDEN_SEPARATOR,
-        "--with-nth",
-        "1",
-        "--preview",
-        f"bash -c {shlex.quote(preview_command)} _ {{}}",
-        "--preview-window",
-        "right:60%:wrap",
-    ]
+    try:
+        source_command = build_fzf_source_command(
+            executable=executable,
+            target_file=target_file_path,
+            search=search,
+            all_mode=all_mode,
+            staged=staged,
+            last_author=last_author,
+            paths=paths,
+        )
 
-    result = subprocess.run(
-        fzf_command,
-        input="\n".join(lines),
-        stdout=subprocess.PIPE,
-        text=True,
-        env=env,
-    )
+        left_command = build_move_command(
+            executable,
+            "left",
+            target_file_path,
+        )
 
-    selected = result.stdout.strip()
+        right_command = build_move_command(
+            executable,
+            "right",
+            target_file_path,
+        )
 
-    if not selected:
-        return
+        env = {
+            **os.environ,
+            "GIT_TREE_PREVIEW_ALL": "1" if all_mode else "0",
+            "GIT_TREE_PREVIEW_STAGED": "1" if staged else "0",
+            "GIT_TREE_FZF_TARGET_FILE": target_file_path,
+        }
 
-    path = selected.split(HIDDEN_SEPARATOR)[-1]
+        fzf_command = [
+            "fzf",
+            "--ansi",
+            "--prompt",
+            "git-tree> ",
+            "--height",
+            "90%",
+            "--border",
+            "--layout",
+            "reverse",
+            "--header-lines",
+            str(header_line_count),
+            "--delimiter",
+            HIDDEN_SEPARATOR,
+            "--with-nth",
+            "1",
+            "--preview",
+            f"bash -c {shlex.quote(preview_command)} _ {{}}",
+            "--preview-window",
+            "right:60%:wrap",
+            "--bind",
+            f"left:execute-silent({left_command})+reload({source_command})",
+            "--bind",
+            f"right:execute-silent({right_command})+reload({source_command})",
+        ]
 
-    if not path:
-        return
+        result = subprocess.run(
+            fzf_command,
+            input=source_output,
+            stdout=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
 
-    editor_command = get_editor_command()
+        selected = result.stdout.strip()
 
-    subprocess.run([
-        *editor_command,
-        path,
-    ])
+        if not selected:
+            return
+
+        path = selected.split(HIDDEN_SEPARATOR)[-1]
+
+        if not path:
+            return
+
+        editor_command = get_editor_command()
+
+        subprocess.run([
+            *editor_command,
+            path,
+        ])
+
+    finally:
+        try:
+            os.unlink(target_file_path)
+        except OSError:
+            pass

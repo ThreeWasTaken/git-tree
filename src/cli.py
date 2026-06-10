@@ -8,7 +8,9 @@ from src.context import (
     get_viewing_context,
 )
 from src.fuzzy import open_with_fzf
+from src.fzf_source import print_fzf_source
 from src.git_utils import get_entries
+from src.history_nav import next_target, previous_target
 from src.render import print_context, print_summary, print_tree
 from src.search import apply_search
 from src.tree_builder import build_tree
@@ -123,6 +125,24 @@ def parse_args() -> argparse.Namespace:
         help="select a file with fzf and open it in $VISUAL/$EDITOR",
     )
 
+    parser.add_argument(
+        "--fzf-source",
+        metavar="TARGET",
+        help=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
+        "--history-prev",
+        metavar="TARGET",
+        help=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
+        "--history-next",
+        metavar="TARGET",
+        help=argparse.SUPPRESS,
+    )
+
     parsed = parser.parse_args(
         normalize_short_flags(sys.argv[1:])
     )
@@ -186,6 +206,33 @@ def split_target_and_paths(
 
 def main() -> None:
     options = parse_args()
+
+    if options.history_prev:
+        target = previous_target(options.history_prev)
+
+        if target:
+            print(target)
+
+        return
+
+    if options.history_next:
+        target = next_target(options.history_next)
+
+        if target:
+            print(target)
+
+        return
+
+    if options.fzf_source:
+        print_fzf_source(
+            target=options.fzf_source,
+            search=options.search or "",
+            all_mode=options.all,
+            staged=options.staged,
+            last_author=options.last_author,
+            paths=options.args,
+        )
+        return
 
     target, paths = split_target_and_paths(
         options.args,
@@ -251,6 +298,8 @@ def main() -> None:
             target,
             options.staged,
             viewing_context,
+            options.last_author,
+            paths,
         )
         return
 
