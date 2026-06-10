@@ -31,9 +31,9 @@ def range_summary(target: str) -> str:
         right = "HEAD"
 
     return (
-        f"{commit_summary(left, RED)} "
-        f"{BOLD}..{RESET} "
-        f"{commit_summary(right, BLUE)}"
+        f"\n  {commit_summary(left, RED)}\n"
+        f"  {BOLD}..{RESET}\n"
+        f"  {commit_summary(right, BLUE)}"
     )
 
 
@@ -52,7 +52,7 @@ def get_viewing_context(
         return "Viewing: worktree changes"
 
     if ".." in target:
-        return f"Viewing: {range_summary(target)}"
+        return f"Viewing:{range_summary(target)}"
 
     return f"Viewing: {commit_summary(target, BLUE)}"
 

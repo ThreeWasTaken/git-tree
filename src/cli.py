@@ -250,6 +250,7 @@ def main() -> None:
             options.all,
             target,
             options.staged,
+            viewing_context,
         )
         return
 

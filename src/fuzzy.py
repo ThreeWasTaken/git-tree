@@ -43,15 +43,11 @@ def format_file_line(
         old_name = entry.old_path.split("/")[-1]
         new_name = entry.path.split("/")[-1]
         display = f"{old_name} {CYAN}→{RESET} {new_name}"
-
     else:
         display = name
 
     if search:
-        display = highlight_text(
-            display,
-            search,
-        )
+        display = highlight_text(display, search)
 
     suffix = ""
 
@@ -59,14 +55,10 @@ def format_file_line(
         details = []
 
         if entry.content_search_count:
-            details.append(
-                f"{entry.content_search_count} contenu"
-            )
+            details.append(f"{entry.content_search_count} contenu")
 
         if entry.filename_search_count:
-            details.append(
-                f"{entry.filename_search_count} nom"
-            )
+            details.append(f"{entry.filename_search_count} nom")
 
         details_text = ", ".join(details)
 
@@ -122,7 +114,6 @@ def build_fzf_lines(
                 f"{BOLD}{name}/{RESET}"
             )
 
-            # Directory lines are displayed for context, but have no selectable path.
             lines.append(
                 f"{display}{HIDDEN_SEPARATOR}"
             )
@@ -215,6 +206,7 @@ def open_with_fzf(
     all_mode: bool,
     target: str,
     staged: bool,
+    viewing_context: str,
 ) -> None:
     if not shutil.which("fzf"):
         print("git tree: fzf is not installed")
@@ -247,6 +239,11 @@ def open_with_fzf(
 
     preview_command = build_preview_command()
 
+    header = (
+        f"{viewing_context}\n"
+        f"{len(entries)} files"
+    )
+
     fzf_command = [
         "fzf",
         "--ansi",
@@ -257,6 +254,8 @@ def open_with_fzf(
         "--border",
         "--layout",
         "reverse",
+        "--header",
+        header,
         "--delimiter",
         HIDDEN_SEPARATOR,
         "--with-nth",
