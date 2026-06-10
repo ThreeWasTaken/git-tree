@@ -295,12 +295,14 @@ def build_move_command(
 ) -> str:
     helper = "--history-prev" if direction == "left" else "--history-next"
 
-    return (
+    script = (
         f'next="$({shlex.quote(executable)} {helper} "$(cat {shlex.quote(target_file)})")"; '
         f'if [ -n "$next" ]; then '
         f'printf "%s" "$next" > {shlex.quote(target_file)}; '
         f'fi'
     )
+
+    return f"bash -c {shlex.quote(script)}"
 
 
 def open_with_fzf(
