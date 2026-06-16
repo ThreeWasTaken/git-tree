@@ -1,7 +1,73 @@
 import os
 
+from src.authors import format_author, load_author_config
 from src.git_utils import run_git
-from src.styles import BLUE, BOLD, RED, RESET, YELLOW
+from src.styles import BLUE, BOLD, CYAN, MAGENTA, RED, RESET, YELLOW
+
+
+def commit_hash(
+    ref: str,
+    color: str | None = None,
+) -> str:
+    output = run_git(
+        ["show", "-s", "--format=%h", ref],
+        exit_on_error=False,
+    ).strip()
+
+    value = output or ref
+
+    if color:
+        return f"{color}{value}{RESET}"
+
+    return value
+
+
+def commit_subject(
+    ref: str,
+    color: str | None = None,
+) -> str:
+    subject = run_git(
+        ["show", "-s", "--format=%s", ref],
+        exit_on_error=False,
+    ).strip()
+
+    if color and subject:
+        return f"{color}{subject}{RESET}"
+
+    return subject
+
+
+def raw_commit_author(ref: str) -> tuple[str, str] | None:
+    output = run_git(
+        ["show", "-s", "--format=%an%x09%ar", ref],
+        exit_on_error=False,
+    ).strip()
+
+    if not output:
+        return None
+
+    try:
+        author, relative_date = output.split("\t", 1)
+    except ValueError:
+        return None
+
+    return author, relative_date
+
+
+def commit_author(ref: str) -> str:
+    raw = raw_commit_author(ref)
+
+    if raw is None:
+        return ""
+
+    author, relative_date = raw
+    config = load_author_config()
+
+    return format_author(
+        author,
+        relative_date,
+        config,
+    )
 
 
 def commit_summary(
@@ -31,9 +97,11 @@ def range_summary(target: str) -> str:
         right = "HEAD"
 
     return (
-        f"\n  {commit_summary(left, RED)}\n"
+        f"\n  From {commit_hash(left, RED)}\n"
+        f"       {commit_subject(left, RED)}\n"
         f"  {BOLD}..{RESET}\n"
-        f"  {commit_summary(right, BLUE)}"
+        f"  To   {commit_hash(right, BLUE)}\n"
+        f"       {commit_subject(right, BLUE)}"
     )
 
 
@@ -43,18 +111,61 @@ def get_viewing_context(
     all_mode: bool,
 ) -> str:
     if all_mode:
-        return "Viewing: all tracked files"
+        return f"{CYAN}Viewing:{RESET} all tracked files"
 
     if staged:
-        return "Viewing: staged changes"
+        return f"{CYAN}Viewing:{RESET} staged changes"
 
     if target == "__WORKTREE__":
-        return "Viewing: worktree changes"
+        return f"{CYAN}Viewing:{RESET} worktree changes"
 
     if ".." in target:
-        return f"Viewing:{range_summary(target)}"
+        return f"{CYAN}Viewing:{RESET}{range_summary(target)}"
 
-    return f"Viewing: {commit_summary(target, BLUE)}"
+    return (
+        f"{CYAN}Viewing:{RESET} "
+        f"{commit_hash(target, BLUE)}\n"
+        f"  {commit_subject(target, BLUE)}"
+    )
+
+
+def get_author_context(
+    target: str,
+    staged: bool,
+    all_mode: bool,
+) -> str | None:
+    if all_mode or staged or target == "__WORKTREE__":
+        return None
+
+    if ".." in target:
+        left, right = target.split("..", 1)
+
+        if not left:
+            left = "HEAD"
+
+        if not right:
+            right = "HEAD"
+
+        left_author = commit_author(left)
+        right_author = commit_author(right)
+
+        if not left_author and not right_author:
+            return None
+
+        return (
+            f"{MAGENTA}Authors: "
+            f"{left_author} "
+            f"{CYAN}→{MAGENTA} "
+            f"{right_author}"
+            f"{RESET}"
+        )
+
+    author = commit_author(target)
+
+    if not author:
+        return None
+
+    return f"{MAGENTA}Author: {author}{RESET}"
 
 
 def get_git_dir() -> str:

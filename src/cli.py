@@ -3,6 +3,7 @@ import sys
 
 from src.authors import get_last_author, load_author_config
 from src.context import (
+    get_author_context,
     get_conflict_files,
     get_rebase_context,
     get_viewing_context,
@@ -247,6 +248,12 @@ def main() -> None:
         all_mode=options.all,
     )
 
+    author_context = get_author_context(
+        target=target,
+        staged=options.staged,
+        all_mode=options.all,
+    )
+
     rebase_context = get_rebase_context()
 
     entries_before_search = get_entries(
@@ -298,6 +305,7 @@ def main() -> None:
             target,
             options.staged,
             viewing_context,
+            author_context,
             options.last_author,
             paths,
         )

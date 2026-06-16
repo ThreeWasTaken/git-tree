@@ -1,5 +1,9 @@
 from src.authors import get_last_author, load_author_config
-from src.context import get_conflict_files, get_viewing_context
+from src.context import (
+    get_author_context,
+    get_conflict_files,
+    get_viewing_context,
+)
 from src.fuzzy import build_fzf_source_output
 from src.git_utils import get_entries
 from src.search import apply_search
@@ -43,11 +47,18 @@ def print_fzf_source(
         all_mode=all_mode,
     )
 
-    print(
-        build_fzf_source_output(
-            entries_after_search,
-            search,
-            all_mode,
-            viewing_context,
-        )
+    author_context = get_author_context(
+        target=target,
+        staged=staged,
+        all_mode=all_mode,
     )
+
+    output, _header_line_count = build_fzf_source_output(
+        entries_after_search,
+        search,
+        all_mode,
+        viewing_context,
+        author_context,
+    )
+
+    print(output)

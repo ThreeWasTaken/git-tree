@@ -6,8 +6,6 @@ import sys
 import tempfile
 from typing import Any
 
-from src.context import get_viewing_context
-from src.history_nav import next_target, previous_target
 from src.models import FileEntry
 from src.search import highlight_text
 from src.styles import BOLD, CYAN, RESET, STATUS_COLOR, YELLOW
@@ -150,10 +148,16 @@ def build_fzf_lines(
 def build_fzf_header(
     viewing_context: str,
     file_count: int,
+    author_context: str | None,
 ) -> list[str]:
     lines = viewing_context.splitlines()
+
+    if author_context:
+        lines.extend(author_context.splitlines())
+
     lines.append(f"{file_count} files")
     lines.append("← older    → newer    Enter open    Esc quit")
+
     return lines
 
 
@@ -162,12 +166,14 @@ def build_fzf_source_output(
     search: str,
     all_mode: bool,
     viewing_context: str,
-) -> str:
+    author_context: str | None,
+) -> tuple[str, int]:
     tree = build_tree(entries)
 
     header_lines = build_fzf_header(
         viewing_context,
         len(entries),
+        author_context,
     )
 
     tree_lines = build_fzf_lines(
@@ -176,18 +182,14 @@ def build_fzf_source_output(
         all_mode,
     )
 
-    return "\n".join(
+    output = "\n".join(
         [
             *header_lines,
             *tree_lines,
         ]
     )
 
-
-def get_fzf_header_line_count(
-    viewing_context: str,
-) -> int:
-    return len(viewing_context.splitlines()) + 2
+    return output, len(header_lines)
 
 
 def build_preview_command() -> str:
@@ -241,13 +243,6 @@ esac
 '''
 
 
-def quote_args(args: list[str]) -> str:
-    return " ".join(
-        shlex.quote(arg)
-        for arg in args
-    )
-
-
 def build_fzf_source_command(
     executable: str,
     target_file: str,
@@ -257,35 +252,34 @@ def build_fzf_source_command(
     last_author: bool,
     paths: list[str],
 ) -> str:
-    args = [
-        executable,
+    command_parts = [
+        shlex.quote(executable),
         "--fzf-source",
-        f'"$(cat {shlex.quote(target_file)})"',
+        '"$target"',
     ]
 
     if all_mode:
-        args.append("--all")
+        command_parts.append("--all")
 
     if staged:
-        args.append("--staged")
+        command_parts.append("--staged")
 
     if last_author:
-        args.append("--last-author")
+        command_parts.append("--last-author")
 
     if search:
-        args.extend(
-            [
-                "--search",
-                search,
-            ]
-        )
+        command_parts.append("--search")
+        command_parts.append(shlex.quote(search))
 
-    args.extend(paths)
+    for path in paths:
+        command_parts.append(shlex.quote(path))
 
-    return quote_args(args).replace(
-        shlex.quote(f'"$(cat {target_file})"'),
-        f'"$(cat {shlex.quote(target_file)})"',
+    script = (
+        f'target="$(cat {shlex.quote(target_file)})"; '
+        f'{" ".join(command_parts)}'
     )
+
+    return f"bash -c {shlex.quote(script)}"
 
 
 def build_move_command(
@@ -312,6 +306,7 @@ def open_with_fzf(
     target: str,
     staged: bool,
     viewing_context: str,
+    author_context: str | None,
     last_author: bool,
     paths: list[str],
 ) -> None:
@@ -320,21 +315,14 @@ def open_with_fzf(
         print("Install it with: sudo apt install fzf")
         return
 
-    if not entries:
-        print("git tree: no file to select")
-        return
-
     executable = sys.argv[0]
 
-    source_output = build_fzf_source_output(
+    source_output, header_line_count = build_fzf_source_output(
         entries,
         search,
         all_mode,
         viewing_context,
-    )
-
-    header_line_count = get_fzf_header_line_count(
-        viewing_context,
+        author_context,
     )
 
     preview_command = build_preview_command()
