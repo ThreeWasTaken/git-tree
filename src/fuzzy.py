@@ -155,6 +155,7 @@ def build_fzf_header(
     if author_context:
         lines.extend(author_context.splitlines())
 
+    lines.append("")
     lines.append(f"{file_count} files")
     lines.append("← older    → newer    Enter open    Esc quit")
 
@@ -194,6 +195,10 @@ def build_fzf_source_output(
 
 def build_preview_command() -> str:
     return r'''
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -n "$repo_root" ]; then
+  cd "$repo_root" || exit 0
+fi
 line="$1"
 path="${line##*$'\037'}"
 
