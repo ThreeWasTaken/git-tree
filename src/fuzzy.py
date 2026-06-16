@@ -149,11 +149,16 @@ def build_fzf_header(
     viewing_context: str,
     file_count: int,
     author_context: str | None,
+    position_context: str,
 ) -> list[str]:
     lines = viewing_context.splitlines()
 
     if author_context:
         lines.extend(author_context.splitlines())
+
+    lines.append(
+        f"\033[33;1mPosition: {position_context}\033[0m"
+    )
 
     lines.append("")
     lines.append(f"{file_count} files")
@@ -168,6 +173,7 @@ def build_fzf_source_output(
     all_mode: bool,
     viewing_context: str,
     author_context: str | None,
+    position_context: str,
 ) -> tuple[str, int]:
     tree = build_tree(entries)
 
@@ -175,6 +181,7 @@ def build_fzf_source_output(
         viewing_context,
         len(entries),
         author_context,
+        position_context,
     )
 
     tree_lines = build_fzf_lines(
@@ -219,6 +226,29 @@ elif printf "%s" "$target" | grep -q "\.\."; then
 else
   mode="commit"
 fi
+
+filename="$(basename "$path")"
+
+if [ "$mode" = "staged" ]; then
+  stats="$(git diff --cached --numstat -- "$path" 2>/dev/null | awk '{print $1 " " $2}')"
+elif [ "$mode" = "range" ]; then
+  stats="$(git diff --numstat "$target" -- "$path" 2>/dev/null | awk '{print $1 " " $2}')"
+elif [ "$mode" = "commit" ]; then
+  stats="$(git show --numstat --format= "$target" -- "$path" 2>/dev/null | awk '{print $1 " " $2}')"
+else
+  stats="$(git diff --numstat HEAD -- "$path" 2>/dev/null | awk '{print $1 " " $2}')"
+fi
+
+added="$(printf "%s" "$stats" | awk '{print $1}')"
+deleted="$(printf "%s" "$stats" | awk '{print $2}')"
+
+printf "\033[33;1m%s\033[0m" "$filename"
+
+if [ -n "$added" ] && [ -n "$deleted" ]; then
+  printf "  \033[32m+%s\033[0m \033[31m-%s\033[0m" "$added" "$deleted"
+fi
+
+printf "\n\n"
 
 case "$mode" in
   all)
@@ -322,12 +352,15 @@ def open_with_fzf(
 
     executable = sys.argv[0]
 
+    position_context = "worktree" if target == "__WORKTREE__" else target
+
     source_output, header_line_count = build_fzf_source_output(
         entries,
         search,
         all_mode,
         viewing_context,
         author_context,
+        position_context,
     )
 
     preview_command = build_preview_command()

@@ -9,6 +9,13 @@ from src.git_utils import get_entries
 from src.search import apply_search
 
 
+def format_position_context(target: str) -> str:
+    if target == "__WORKTREE__":
+        return "worktree"
+
+    return target
+
+
 def print_fzf_source(
     target: str,
     search: str,
@@ -59,6 +66,7 @@ def print_fzf_source(
         all_mode,
         viewing_context,
         author_context,
+        format_position_context(target),
     )
 
     print(output)

@@ -9,6 +9,11 @@ class HistoryPosition:
     start_offset: int | None = None
     end_offset: int | None = None
 
+def format_position(target: str) -> str:
+    if target == "__WORKTREE__":
+        return "worktree"
+
+    return target
 
 def offset_to_ref(offset: int) -> str:
     if offset == 0:
