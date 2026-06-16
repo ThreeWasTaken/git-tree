@@ -15,7 +15,7 @@ It provides a fast visual overview of changed files, commits, ranges, searches, 
 
 ---
 
-<img width="606" height="310" alt="image" src="https://github.com/user-attachments/assets/6afb5fd8-12f2-46c2-81a8-390058a10878" />
+<img width="1656" height="898" alt="tn9Sjj0" src="https://github.com/user-attachments/assets/76e0a12d-6c39-4ccb-b154-d9140c2942aa" />
 
 ---
 
