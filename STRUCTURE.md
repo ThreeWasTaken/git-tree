@@ -1,6 +1,6 @@
-# Project Structure
+# 🏗️ Project Structure
 
-`git-tree` is split into small modules so each file has a clear responsibility.
+`git-tree` is split into small focused modules so each file has a clear responsibility.
 
 ```text
 git-tree/
@@ -13,7 +13,10 @@ git-tree/
     ├── authors.py
     ├── cli.py
     ├── context.py
+    ├── fuzzy.py
+    ├── fzf_source.py
     ├── git_utils.py
+    ├── history_nav.py
     ├── models.py
     ├── render.py
     ├── search.py
@@ -21,9 +24,9 @@ git-tree/
     └── tree_builder.py
 ```
 
-## Root files
+# Root files
 
-### `git-tree`
+## `git-tree`
 
 Executable entrypoint.
 
@@ -33,23 +36,21 @@ It only imports and runs:
 from src.cli import main
 ```
 
-This keeps the executable file small and lets the real logic live in `src/`.
-
-### `README.md`
+## `README.md`
 
 User-facing documentation:
 
 - installation
 - usage
 - examples
-- options
-- author icons configuration
+- configuration
+- interactive navigation
 
-### `STRUCTURE.md`
+## `STRUCTURE.md`
 
-Developer-facing documentation explaining the internal project layout.
+Developer-facing documentation explaining the internal layout.
 
-### `.gitignore`
+## `.gitignore`
 
 Ignores Python cache files:
 
@@ -62,16 +63,6 @@ __pycache__/
 
 # `src/` package
 
-## `src/__init__.py`
-
-Package marker and version metadata.
-
-```python
-__version__ = "0.1.0"
-```
-
----
-
 ## `src/cli.py`
 
 Main orchestration layer.
@@ -80,14 +71,14 @@ Responsibilities:
 
 - parse CLI arguments
 - normalize combined short flags like `-asvl`
+- detect hidden/internal modes
 - decide target/path mode
 - call Git data collection
 - call search filtering
 - call author enrichment
 - call tree building
 - call rendering
-
-This is the main control flow of the application.
+- launch interactive fzf mode
 
 ---
 
@@ -107,8 +98,6 @@ Responsibilities:
 - parse Git `--name-status` output
 - mark conflicted files as `C`
 
-This file is the bridge between Git and the internal `FileEntry` model.
-
 ---
 
 ## `src/models.py`
@@ -121,9 +110,7 @@ Currently contains:
 FileEntry
 ```
 
-A `FileEntry` represents one file displayed by `git-tree`.
-
-It stores:
+A `FileEntry` stores:
 
 - status (`A`, `M`, `D`, `R`, `C`, `T`)
 - path
@@ -136,23 +123,19 @@ It stores:
 
 ## `src/context.py`
 
-Git context detection.
+Git context detection and formatting.
 
 Responsibilities:
 
-- build the `Viewing:` line
-- summarize commits and ranges
-- color old/new commits in ranges
+- build the `Viewing:` block
+- format commit hashes and subjects
+- format author metadata
+- reuse author aliases/icons from config
+- summarize commit ranges
 - detect ongoing rebase
 - detect conflicted files
 
-Examples:
-
-```text
-Viewing: worktree changes
-Viewing: old_commit .. new_commit
-Rebase: applying abc123 commit message
-```
+Used by both normal output and interactive fzf mode.
 
 ---
 
@@ -163,15 +146,10 @@ Search logic.
 Responsibilities:
 
 - search inside file contents
-- search inside file names
+- search inside filenames
 - support glob patterns like `*.php`
 - highlight matching text
 - filter entries when `--search` is used
-
-Notes:
-
-- glob searches apply to filenames
-- plain text searches apply to filenames and file contents
 
 ---
 
@@ -192,13 +170,110 @@ Responsibilities:
 - fetch last author information with Git
 - format author display
 
-Example output:
+Example:
 
 ```text
 [🎩 user-a • 2 hours ago]
 ```
 
-If no config exists, raw Git author names are used.
+---
+
+## `src/render.py`
+
+Terminal rendering for normal mode.
+
+Responsibilities:
+
+- print the context header
+- render the tree
+- color statuses
+- display search occurrences
+- display verbose matching lines
+- display author suffixes
+- print summary statistics
+- optionally print the status legend
+
+---
+
+## `src/fuzzy.py`
+
+Interactive fzf interface.
+
+Responsibilities:
+
+- build fzf display lines
+- preserve tree-like rendering inside fzf
+- build live preview commands
+- display selected filename and `+/-` stats
+- open selected files in `$VISUAL`, `$EDITOR`, or `nano`
+- bind left/right navigation
+- reload fzf data when history changes
+
+Controls:
+
+```text
+← older commit/range
+→ newer commit/range
+Enter open file
+Esc quit
+```
+
+---
+
+## `src/fzf_source.py`
+
+Internal fzf data source.
+
+Responsibilities:
+
+- regenerate fzf rows for a target
+- regenerate header/context metadata
+- apply search filters
+- apply last-author enrichment
+- support fzf reloads
+
+This module powers hidden internal calls like:
+
+```text
+--fzf-source
+```
+
+It is not part of the public CLI.
+
+---
+
+## `src/history_nav.py`
+
+History navigation helpers.
+
+Responsibilities:
+
+- parse commit positions
+- move to older commits
+- move to newer commits
+- move ranges through history
+- prevent moving before the first commit
+- support worktree ↔ commit navigation
+
+Examples:
+
+```text
+worktree
+← HEAD
+← HEAD^
+
+HEAD^
+→ HEAD
+→ worktree
+```
+
+Range navigation:
+
+```text
+HEAD~3..HEAD~1
+← HEAD~4..HEAD~2
+→ HEAD~2..HEAD
+```
 
 ---
 
@@ -208,8 +283,8 @@ Tree construction.
 
 Responsibilities:
 
-- convert flat file paths into a nested tree structure
-- insert `FileEntry` objects into that tree
+- convert flat file paths into nested dictionaries
+- insert `FileEntry` objects into the tree
 
 Example:
 
@@ -227,50 +302,39 @@ src/
 
 ---
 
-## `src/render.py`
-
-Terminal rendering.
-
-Responsibilities:
-
-- print the context header
-- render the tree
-- color statuses
-- display search occurrences
-- display verbose matching lines
-- display author suffixes
-- print summary statistics
-- optionally print the status legend
-
-This file owns all terminal output formatting.
-
----
-
 ## `src/styles.py`
 
 Shared ANSI styles.
 
-Contains color constants like:
+Contains:
+
+- color constants
+- bold/reset codes
+- status-to-color mapping
+
+Example:
 
 ```python
-GREEN
-BLUE
-RED
-YELLOW
-RESET
+STATUS_COLOR = {
+    "A": GREEN,
+    "M": BLUE,
+    "D": RED,
+    "R": MAGENTA,
+    "C": YELLOW,
+}
 ```
 
-and status-to-color mapping:
+---
 
-```python
-STATUS_COLOR
-```
+## `src/__init__.py`
+
+Package marker and version metadata.
 
 ---
 
 # Data flow
 
-Typical execution flow:
+## Normal mode
 
 ```text
 git-tree
@@ -283,13 +347,31 @@ src.context builds Viewing/Rebase/Conflict context
    ↓
 src.git_utils collects FileEntry objects
    ↓
-src.search optionally filters/enriches entries
+src.search optionally filters entries
    ↓
 src.authors optionally adds last-author info
    ↓
 src.tree_builder builds nested tree
    ↓
 src.render prints output
+```
+
+## Interactive fzf mode
+
+```text
+git-tree --fzf
+   ↓
+src.cli.main()
+   ↓
+collect FileEntry objects
+   ↓
+src.fuzzy launches fzf
+   ↓
+src.fzf_source regenerates rows on reload
+   ↓
+src.history_nav moves target with ← / →
+   ↓
+src.fuzzy opens selected file
 ```
 
 ---
@@ -300,5 +382,8 @@ src.render prints output
 - Keep Git calls isolated
 - Keep rendering isolated
 - Keep search isolated
+- Keep fzf logic isolated
+- Keep history navigation isolated
 - Make new features easy to add without editing one huge file
 - Keep the tool dependency-free except for Python and Git
+- Keep `fzf` optional
