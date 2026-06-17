@@ -277,6 +277,7 @@ def main() -> None:
 
         print_context(
             viewing_context=viewing_context,
+            author_context=author_context,
             rebase_context=rebase_context,
             conflict_files=conflict_files,
         )
@@ -317,6 +318,7 @@ def main() -> None:
 
     print_context(
         viewing_context=viewing_context,
+        author_context=author_context,
         rebase_context=rebase_context,
         conflict_files=conflict_files,
     )

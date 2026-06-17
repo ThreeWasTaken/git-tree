@@ -41,11 +41,15 @@ def print_match_lines(
 
 def print_context(
     viewing_context: str,
+    author_context: str | None,
     rebase_context: str | None,
     conflict_files: set[str],
 ) -> None:
 
     print(f"{BOLD}{viewing_context}{RESET}")
+
+    if author_context:
+        print(author_context)
 
     if rebase_context:
         print(f"{YELLOW}{rebase_context}{RESET}")
@@ -58,7 +62,6 @@ def print_context(
         )
 
     print()
-
 
 def print_tree(
     node: dict[str, Any],
