@@ -10,44 +10,29 @@ from src.context import (
 )
 from src.fuzzy import open_with_fzf
 from src.fzf_source import print_fzf_source
-from src.git_utils import get_entries
+from src.git_utils import get_entries, run_git
 from src.history_nav import next_target, previous_target
 from src.render import print_context, print_summary, print_tree
 from src.search import apply_search
 from src.tree_builder import build_tree
 
 
-def normalize_short_flags(
-    argv: list[str],
-) -> list[str]:
-
+def normalize_short_flags(argv: list[str]) -> list[str]:
     normalized = []
     i = 0
 
     while i < len(argv):
         arg = argv[i]
 
-        if (
-            arg.startswith("-")
-            and not arg.startswith("--")
-            and len(arg) > 2
-        ):
+        if arg.startswith("-") and not arg.startswith("--") and len(arg) > 2:
             chars = arg[1:]
-            valid = {
-                "a",
-                "s",
-                "v",
-                "l",
-            }
+            valid = {"a", "s", "v", "l"}
 
             if all(char in valid for char in chars):
                 for char in chars:
                     normalized.append(f"-{char}")
 
-                    if (
-                        char == "s"
-                        and i + 1 < len(argv)
-                    ):
+                    if char == "s" and i + 1 < len(argv):
                         normalized.append(argv[i + 1])
                         i += 1
 
@@ -60,6 +45,18 @@ def normalize_short_flags(
     return normalized
 
 
+def resolve_author(author: str | None) -> str | None:
+    if author != "me":
+        return author
+
+    name = run_git(
+        ["config", "user.name"],
+        exit_on_error=False,
+    ).strip()
+
+    return name or None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="git tree",
@@ -67,86 +64,21 @@ def parse_args() -> argparse.Namespace:
         add_help=False,
     )
 
-    parser.add_argument(
-        "args",
-        nargs="*",
-        help="commit/range and optional paths",
-    )
+    parser.add_argument("args", nargs="*", help="commit/range and optional paths")
+    parser.add_argument("-h", "--help", action="store_true", dest="help")
+    parser.add_argument("-a", "--all", action="store_true", help="show/search all tracked files")
+    parser.add_argument("-s", "--search", metavar="STRING", help="search in file contents and names")
+    parser.add_argument("-v", "--verbose", action="store_true", help="show matching lines")
+    parser.add_argument("-l", "--last-author", action="store_true", help="show last author")
+    parser.add_argument("--author", help="only include commits authored by NAME, or use 'me'")
+    parser.add_argument("--legend", action="store_true", help="show status legend")
+    parser.add_argument("--staged", action="store_true", help="show staged files")
+    parser.add_argument("--fzf", action="store_true", help="select a file with fzf and open it in $VISUAL/$EDITOR")
+    parser.add_argument("--fzf-source", metavar="TARGET", help=argparse.SUPPRESS)
+    parser.add_argument("--history-prev", metavar="TARGET", help=argparse.SUPPRESS)
+    parser.add_argument("--history-next", metavar="TARGET", help=argparse.SUPPRESS)
 
-    parser.add_argument(
-        "-h",
-        "--help",
-        action="store_true",
-        dest="help",
-    )
-
-    parser.add_argument(
-        "-a",
-        "--all",
-        action="store_true",
-        help="show/search all tracked files",
-    )
-
-    parser.add_argument(
-        "-s",
-        "--search",
-        metavar="STRING",
-        help="search in file contents and names",
-    )
-
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="show matching lines",
-    )
-
-    parser.add_argument(
-        "-l",
-        "--last-author",
-        action="store_true",
-        help="show last author",
-    )
-
-    parser.add_argument(
-        "--legend",
-        action="store_true",
-        help="show status legend",
-    )
-
-    parser.add_argument(
-        "--staged",
-        action="store_true",
-        help="show staged files",
-    )
-
-    parser.add_argument(
-        "--fzf",
-        action="store_true",
-        help="select a file with fzf and open it in $VISUAL/$EDITOR",
-    )
-
-    parser.add_argument(
-        "--fzf-source",
-        metavar="TARGET",
-        help=argparse.SUPPRESS,
-    )
-
-    parser.add_argument(
-        "--history-prev",
-        metavar="TARGET",
-        help=argparse.SUPPRESS,
-    )
-
-    parser.add_argument(
-        "--history-next",
-        metavar="TARGET",
-        help=argparse.SUPPRESS,
-    )
-
-    parsed = parser.parse_args(
-        normalize_short_flags(sys.argv[1:])
-    )
+    parsed = parser.parse_args(normalize_short_flags(sys.argv[1:]))
 
     if parsed.help:
         print_help()
@@ -168,34 +100,13 @@ def print_help() -> None:
   git tree -as <string>
   git tree -asv <string>
   git tree -asvl <string>
+  git tree --author me
   git tree --fzf
-
-examples:
-  git tree
-  git tree HEAD^
-  git tree HEAD~5..HEAD
-  git tree --staged
-  git tree HEAD src/
-  git tree HEAD -- app/components
-  git tree --all
-  git tree --all src/
-  git tree -s TODO
-  git tree HEAD -s TODO
-  git tree -as "*.php"
-  git tree -asv TODO
-  git tree -asvl "*.png"
-  git tree HEAD --fzf
-  git tree -as "*.php" --fzf
-  git tree --legend
 """
     )
 
 
-def split_target_and_paths(
-    raw_args: list[str],
-    staged: bool,
-) -> tuple[str, list[str]]:
-
+def split_target_and_paths(raw_args: list[str], staged: bool) -> tuple[str, list[str]]:
     if staged:
         return "HEAD", raw_args
 
@@ -207,21 +118,18 @@ def split_target_and_paths(
 
 def main() -> None:
     options = parse_args()
+    options.author = resolve_author(options.author)
 
     if options.history_prev:
         target = previous_target(options.history_prev)
-
         if target:
             print(target)
-
         return
 
     if options.history_next:
         target = next_target(options.history_next)
-
         if target:
             print(target)
-
         return
 
     if options.fzf_source:
@@ -235,10 +143,7 @@ def main() -> None:
         )
         return
 
-    target, paths = split_target_and_paths(
-        options.args,
-        options.staged,
-    )
+    target, paths = split_target_and_paths(options.args, options.staged)
 
     conflict_files = get_conflict_files()
 
@@ -269,10 +174,7 @@ def main() -> None:
         options.search or "",
     )
 
-    if (
-        options.search
-        and not entries_after_search
-    ):
+    if options.search and not entries_after_search:
         from src.styles import BOLD, CYAN, RESET, YELLOW
 
         print_context(
@@ -312,9 +214,7 @@ def main() -> None:
         )
         return
 
-    tree = build_tree(
-        entries_after_search
-    )
+    tree = build_tree(entries_after_search)
 
     print_context(
         viewing_context=viewing_context,
