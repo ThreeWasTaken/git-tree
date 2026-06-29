@@ -26,6 +26,12 @@ def run_git(
 
         return ""
 
+    output = run_git(
+        ["show", "-s", "--format=%an", target],
+        exit_on_error=False,
+    ).strip()
+
+    return author.lower() in output.lower()
 
 def parse_entries(
     output: str,

@@ -57,6 +57,46 @@ def resolve_author(author: str | None) -> str | None:
     return name or None
 
 
+def get_history_previous_target(
+    target: str,
+    author: str | None,
+) -> str | None:
+    if author:
+        from src.author_history import (
+            get_author_commits,
+            get_previous_author_target,
+        )
+
+        commits = get_author_commits(author)
+
+        return get_previous_author_target(
+            commits,
+            target,
+        )
+
+    return previous_target(target)
+
+
+def get_history_next_target(
+    target: str,
+    author: str | None,
+) -> str | None:
+    if author:
+        from src.author_history import (
+            get_author_commits,
+            get_next_author_target,
+        )
+
+        commits = get_author_commits(author)
+
+        return get_next_author_target(
+            commits,
+            target,
+        )
+
+    return next_target(target)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="git tree",
@@ -100,7 +140,7 @@ def print_help() -> None:
   git tree -as <string>
   git tree -asv <string>
   git tree -asvl <string>
-  git tree --author me
+  git tree --author me --fzf
   git tree --fzf
 """
     )
@@ -120,16 +160,33 @@ def main() -> None:
     options = parse_args()
     options.author = resolve_author(options.author)
 
+    if options.author and not options.fzf and not options.history_prev and not options.history_next:
+        print(
+            "git tree: --author is only supported with --fzf navigation",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     if options.history_prev:
-        target = previous_target(options.history_prev)
+        target = get_history_previous_target(
+            options.history_prev,
+            options.author,
+        )
+
         if target:
             print(target)
+
         return
 
     if options.history_next:
-        target = next_target(options.history_next)
+        target = get_history_next_target(
+            options.history_next,
+            options.author,
+        )
+
         if target:
             print(target)
+
         return
 
     if options.fzf_source:
@@ -210,6 +267,7 @@ def main() -> None:
             viewing_context,
             author_context,
             options.last_author,
+            options.author,
             paths,
         )
         return

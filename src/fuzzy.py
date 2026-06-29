@@ -322,18 +322,23 @@ def build_move_command(
     executable: str,
     direction: str,
     target_file: str,
+    author: str | None,
 ) -> str:
     helper = "--history-prev" if direction == "left" else "--history-next"
 
+    author_part = ""
+
+    if author:
+        author_part = f" --author {shlex.quote(author)}"
+
     script = (
-        f'next="$({shlex.quote(executable)} {helper} "$(cat {shlex.quote(target_file)})")"; '
+        f'next="$({shlex.quote(executable)} {helper} "$(cat {shlex.quote(target_file)})"{author_part})"; '
         f'if [ -n "$next" ]; then '
         f'printf "%s" "$next" > {shlex.quote(target_file)}; '
         f'fi'
     )
 
     return f"bash -c {shlex.quote(script)}"
-
 
 def open_with_fzf(
     entries: list[FileEntry],
@@ -344,6 +349,7 @@ def open_with_fzf(
     viewing_context: str,
     author_context: str | None,
     last_author: bool,
+    author: str | None,
     paths: list[str],
 ) -> None:
     if not shutil.which("fzf"):
@@ -395,12 +401,14 @@ def open_with_fzf(
             executable,
             "left",
             target_file_path,
+            author,
         )
 
         right_command = build_move_command(
             executable,
             "right",
             target_file_path,
+            author,
         )
 
         env = {
