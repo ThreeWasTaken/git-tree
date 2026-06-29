@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from typing import Any
+from src.navigation import NavigationState, format_position
 
 from src.models import FileEntry
 from src.search import highlight_text
@@ -352,7 +353,13 @@ def open_with_fzf(
 
     executable = sys.argv[0]
 
-    position_context = "worktree" if target == "__WORKTREE__" else target
+    navigation_state = NavigationState(
+        target=target,
+    )
+
+    position_context = format_position(
+        navigation_state.target,
+    )
 
     source_output, header_line_count = build_fzf_source_output(
         entries,
